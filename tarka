@@ -1,10 +1,9 @@
 #!/bin/sh
 # backup
 #
-# this script first unpacks any older incremental backups and then rsynces first
+# incremental backups using tar rsync
 # works transparently over ssh by mounting with sshfs
-# all unpacking happens in temp dir outside ssh being secure
-# TODO: add gpg encryption
+# unencrypted files are never visible on the remote
 #
 
 parse() {
@@ -36,9 +35,13 @@ mangle() {
     printf "%s" "$mangle"
 }
 
+realmangle() {
+    mangle "$(realpath "$1")"
+}
+
 latest() {
     latest=""
-    for i in "$repo"/"$(mangle $1)"*; do
+    for i in "$repo"/"$(realmangle $1)"*; do
         if test "${i##*.}" != snar; then
             latest="$i"
         fi
@@ -46,18 +49,50 @@ latest() {
     printf "%s" "$latest"
 }
 
-group() { # path hash
-    printf "%s" "${temp}/$(mangle "$1")~$2"
+extract_dir() { # path hash
+    printf "%s" "${temp}/$(realmangle "$1")~$2"
+}
+
+dst() {
+    printf "%s" "${1}/$(realmangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}" # target for tar dst
+}
+
+encrypt() {
+    gpg -q --pinentry-mode=loopback --passphrase "asdf" --symmetric --cipher-algo AES256 "$@"
+}
+
+fetch() {
+    echo "-- fetch"
+    for i in "$repo"/"$(realmangle $1)"*"$2"*.gpg; do
+        parse "$i"
+        test "$pnr" -gt "${3-2137}" && break
+        echo "$i"
+        sync "$i" "$temp/${i#$repo}" || exit 1
+    done
+}
+
+ungpg() {
+    echo "-- ungpg"
+    for i in "$temp"/"$(realmangle $1)"*"$2"*.gpg; do
+        parse "$i"
+        test "$pnr" -gt "${3-2137}" && break
+        echo "$i..."
+        gpg -q --pinentry-mode=loopback --passphrase "asdf" --output "${i%.gpg}.tar" --decrypt "$i"
+    done
 }
 
 untar() {
     echo "-- untar"
-    for i in "$repo"/"$(mangle $1)"*"$2"*.tar; do
+    for i in "$temp"/"$(realmangle $1)"*"$2"*.tar; do
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i..."
         tar xf "$i" -C "$temp/" -G
     done
+    if ! test -e "$(extract_dir "$1" "$2")"; then
+        echo "untar error; exiting" >&2
+        exit 1
+    fi
 }
 
 genhash() {
@@ -66,7 +101,7 @@ genhash() {
 
 list() {
     printf "%-40s %-30s %-8s %-4s %s\n" "src" "date" "hash" "nr" "tag"
-    for i in "$repo/$(mangle $1)"*.tar; do
+    for i in "$repo/$(realmangle $1)"*.gpg; do
         test -e "$i" || break
         parse "$i"
         printf "%-40s %-30s %8s %-4s %s\n" "$psrc" "$pdate" "$phash" "$pnr" "$ptag"
@@ -75,10 +110,7 @@ list() {
 
 sync() {
     # exit 0
-    echo "-- syncing $2"
-    rsync -avz --delete \
-          "${1}/" \
-          "${2}"
+    rsync "${3--q}" -az --delete  "${1}" "${2}"
     # --exclude-from="$0-ignore" \
 }
 
@@ -90,10 +122,21 @@ targ() {
     fi
     echo "-- taring with $snar..."
     tar cf "${2}.tar" "${1}" -g  "$snar" -P --xform="s|^${temp}/||"
+    if ! test -e "${2}.tar"; then
+        echo "targ error; exiting"
+        exit 1
+    fi
 }
 
 usage() {
-    echo "$0 cmd repo cmd_args"
+    cat >&2 <<EOF
+$0 cmd repo args
+cmd:
+    full
+    incremental
+    list
+    restore
+EOF
     exit 1
 }
 
@@ -101,59 +144,35 @@ is_repo() {
     test -e "$repo/.repo" || usage
 }
 
+info_header() {
+    printf "%-15s : %s\n" "temp" "$temp"
+    printf "%-15s : %s\n" "tag" "$tag"
+    printf "%-15s : %s\n" "extract" "$xdir"
+    printf "%-15s : %s\n" "latest" "$latest"
+    printf "%-15s : %s\n" "destination" "$dst"
+    echo "----------"
+}
+
 restore() { # src hash
-    if test -e "$1"; then
-        read -p "$1 will be overwritten; continue? (yes/n): " choice
+    src="$(realpath "$1")"
+    hash="$2"
+    nr="$3"
+
+    if test -e "$src"; then
+        read -p "$src will be overwritten; continue? (yes/n): " choice
         test "$choice" != "yes" && exit 0
     fi
-    untar "$1" "$2" "$3"
-    echo "$(group "$1" "$2")"
-    if ! test -e "$(group "$1" "$2")"; then
-        echo "untar error; exiting" >&2
-        exit 1
-    fi
-    sync "$(group "$1" "$2")" "$1"
-    rm -rf "$(group "$1" "$2")"
+    info_header # debug info
+    fetch "$src" "$hash" "$nr"
+    ungpg "$src" "$hash" "$nr"
+    untar "$src" "$hash" "$nr"
+    echo "-- restore $src"
+    sync "$(extract_dir "$src" "$hash")/" "$src" -v
+    rm -r "$(extract_dir "$src" "$hash")"
 }
 
-disconn() {
-    ARG=$?
-    fusermount -u "$sshtemp"
-    rmdir "$sshtemp"
-    exit $ARG
-}
 
-main() {
-    test -n "$1" || usage
-    test -n "$2" || usage
-
-    isfull=0
-    isinc=0
-    isres=0
-
-    cmd="$1"
-    repo="$2"
-    temp=$(mktemp -d)
-    if echo "$repo" | grep -q ':'; then
-        sshtemp=$(mktemp -d)
-        ssh="ssh ${repo%:}"
-        sshfs "$repo" "$sshtemp"
-        trap disconn EXIT
-        repo="$sshtemp"
-    else
-        repo="$(realpath ${2%/})"
-    fi
-    shift && shift
-    is_repo
-    case "$cmd" in
-        f*)  isfull=1 ;;
-        i*)  isinc=1  ;;
-        r*)  restore  "$@"; exit;;
-        l*)  list "$@";     exit;;
-        *) echo "invalid operation: $cmd;" >&2
-           exit 1;;
-    esac
-
+backup() {
     src="$(realpath $1)"
     tag=${2:-}
     date=$(date +'%Y-%m-%d__%H-%M.%S')
@@ -169,20 +188,55 @@ main() {
         nr="$((pnr+1))"
     fi
 
-    group=$(group "$src" "$hash") # target for sync and the tar source
-    dst="${repo}/$(mangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}" # target for tar dst
+    xdir=$(extract_dir "$src" "$hash") # target for sync and the tar source
+    dst=$(dst "$temp")
+    info_header # debug info
+    if test "$isfull" -eq 0; then
+        fetch "$src" "$hash"
+        ungpg "$src" "$hash"
+        untar "$src" "$hash"
+    fi
+    sync "$src/" "$xdir"
+    targ "$xdir" "$(dst "$temp")"
+    encrypt "$(dst "$temp").tar"
+    sync "$(dst "$temp").tar.gpg" "$(dst "$repo").tar.gpg"
+    rm -r "$xdir"
+    rm -r "$temp"
+}
 
-    printf "%-15s : %s\n" "temp" "$temp"
-    printf "%-15s : %s\n" "tag" "$tag"
-    printf "%-15s : %s\n" "group" "$group"
-    printf "%-15s : %s\n" "latest" "$latest"
-    printf "%-15s : %s\n" "destination" "$dst"
-    echo "----------"
+disconn() {
+    ARG=$?
+    fusermount -u "$sshtemp"
+    rmdir "$sshtemp"
+    exit $ARG
+}
 
-    test "$isfull" -eq 0 && untar "$src" "$hash"
-    sync "$src" "$group"
-    targ "$group" "$dst"
-    rm -rf "$group"
+main() {
+    test -n "$1" || usage
+    test -n "$2" || usage
+
+    isfull=0
+    cmd="$1"
+    repo="$2"
+    temp=$(mktemp -d)
+    if echo "$repo" | grep -q ':'; then
+        sshtemp=$(mktemp -d)
+        ssh="ssh ${repo%:}"
+        sshfs "$repo" "$sshtemp"
+        trap disconn EXIT
+        repo="$sshtemp"
+    else
+        repo="$(realpath ${2%/})"
+    fi
+    shift && shift
+    case "$cmd" in
+        f*)  isfull=1; backup "$@"; exit;;
+        i*)  is_repo; backup  "$@"; exit;;
+        r*)  is_repo; restore "$@"; exit;;
+        l*)  is_repo; list    "$@"; exit;;
+        *) echo "invalid operation: $cmd;" >&2
+           exit 1;;
+    esac
 }
 
 main "$@"
