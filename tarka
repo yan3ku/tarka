@@ -5,10 +5,25 @@
 # unencrypted files are never exposed on the remote system
 # root privileges are required to preserve permissions (see tar man page for -p)
 #
+# TODO: cleanup
+#
 #set -x
 
+passprompt() {
+    stty -echo
+    printf "Backup password: "
+    read pass
+    stty echo
+    echo
+}
+
+cleanup() {
+    rm "$repo/.lock"
+    # test -e "$fetchdir/$(dst).tar" && rm -r "$fetchdir/$(dst).tar"
+}
+
 parse() { # parse backup file name and their metadata eg:
-# home~yaneko~devel~tarka~test-in~2025-10-16__16-22.39=fb63256f!0.tar.gpg
+    # home~yaneko~devel~tarka~test-in~2025-10-16__16-22.39=fb63256f!0.tar.gpg
     set -- "$(basename "$1")"
     psrc="$(echo "~${1%~*}~" | tr '~' '/')"
     pmeta="${1##*~}"
@@ -60,8 +75,13 @@ dst() { # destination name for new backup
     printf "%s" "$(realmangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}"
 }
 
+exits() {
+    printf "%s; exiting\n" "--! $1" >&2
+    exit 1
+}
+
 encrypt() {
-    gpg -q --pinentry-mode=loopback --passphrase "asdf" --symmetric --cipher-algo AES256 "$@"
+    gpg -q --batch --passphrase "$pass" --symmetric --cipher-algo AES256 "$@" || exits "gpg encrypt error"
 }
 
 fetch() { # fetches from sshfs
@@ -71,7 +91,7 @@ fetch() { # fetches from sshfs
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i"
-        sync "$i" "$fetchdir/${i#$repo}" || exit 1
+        sync "$i" "$fetchdir/${i#$repo}" || exits "failed fetching $i"
     done
 }
 
@@ -81,7 +101,7 @@ ungpg() {
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i..."
-        gpg -q --pinentry-mode=loopback --passphrase "asdf" --output "${i%.gpg}.tar" --decrypt "$i"
+        gpg -q --batch --passphrase "$pass" --output "${i%.gpg}" --decrypt "$i" || exits "gpg decrypt error"
     done
 }
 
@@ -91,17 +111,19 @@ untar() {
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i..."
-        tar -xpf "$i" -C "$fetchdir/" -G
+        tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive "$i""
         rm "$i"
     done
-    if ! test -e "$(merge_dir "$1" "$2")"; then
-        echo "untar error; exiting" >&2
-        exit 1
-    fi
+    test -e "$(merge_dir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
 
 genhash() { # each set of incremental backups is grouped by hash
-    date +%s | md5sum | head -c 8
+    hash=$(date +%s | md5sum | head -c 8)
+    hash="bcab3cb1"
+    while "$repo/$(realmangle $src)"*"$hash"*.gpg; do
+        hash=$(date +%s | md5sum | head -c 8)
+    done
+    printf "%s" "$hash"
 }
 
 list() {
@@ -119,16 +141,9 @@ sync() {
 
 targ() { # tar with -g
     snar="$repo/${1#$fetchdir/}.snar"
-    if test "$isfull" -eq 0 && ! test -e "$snar"; then
-        echo "targ; snar at $snar doesn't exist; exiting"
-        exit 1
-    fi
+    test "$isfull" -eq 0 && ! test -e "$snar" && exits "snar at $snar doesn't exist"
     echo "-- tar with $snar..."
-    tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --xform="s|^${fetchdir}/||"
-    if ! test -e "${2}.tar"; then
-        echo "targ error; exiting"
-        exit 1
-    fi
+    tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
 }
 
 usage() {
@@ -145,7 +160,7 @@ EOF
 
 is_repo() {
     if ! test -e "$repo/.repo"; then
-        echo "not backup repository; exiting" >&2
+        echo "-- not backup repository; exiting" >&2
         usage
     fi
 }
@@ -164,6 +179,7 @@ restore() { # src hash
     test -n "$1" || usage
     test -n "$2" || usage
 
+    passprompt
     src="$(realpath "$1")"
     hash="$2"
     nr="$3"
@@ -181,12 +197,13 @@ restore() { # src hash
     rm -r "$(merge_dir "$src" "$hash")"
 }
 
-
 backup() {
     test -n "$1" || usage
 
+    passprompt
     src="$(realpath $1)"
     tag=${2:-}
+    # %S is needed for correct ordering just in case of multiple backups in the same minut
     date=$(date +'%Y-%m-%d__%H-%M.%S')
     latest=$(latest "$src")
 
@@ -203,6 +220,7 @@ backup() {
     mkdir -p "$fetchdir"
     xdir=$(merge_dir "$src" "$hash") # target for sync and the tar source
     info_header # debug info
+    exit 0
     if test "$isfull" -eq 0; then
         fetch "$src" "$hash"
         ungpg "$src" "$hash"
@@ -220,10 +238,11 @@ backup() {
 }
 
 disconn() {
-    ARG=$?
-    fusermount -u "$sshtemp"
-    rmdir "$sshtemp"
-    exit $ARG
+    arg=$?
+    fusermount -u "$repo"
+    rmdir "$repo"
+    cleanup
+    exit $arg
 }
 
 main() {
@@ -232,28 +251,28 @@ main() {
 
     isfull=0
     cmd="$1"
-    repo="$2"
-    if echo "$repo" | grep -q ':'; then
-        fetchdir=$(mktemp -d)
-        sshtemp=$(mktemp -d)
-        if ! sshfs "$repo" "$sshtemp"; then
-            echo "error connecting with server; check auth; exiting;" >&2
-            exit 1
-        fi
-        trap disconn EXIT
-        repo="$sshtemp"
-    else
-        repo="$(realpath ${2%/})"
-        fetchdir="${repo}"
-    fi
-    shift && shift
+    case "$2" in
+        *:*)
+            fetchdir=$(mktemp -d)
+            repo=$(mktemp -d)
+            sshfs "$2" "$repo" || exits "error connecting with server; check auth"
+            trap disconn EXIT
+            ;;
+        *)
+            repo="$(realpath ${2%/})"
+            fetchdir="${repo}"
+            trap cleanup EXIT
+            ;;
+    esac
+    shift 2
+    test -e "$repo/.lock" && exits "backup repository is locked; either wait for job to finish or delete .lock"
+    touch "$repo/.lock"
     case "$cmd" in
-        f*)  isfull=1; backup "$@"; exit;;
-        i*)  is_repo; backup  "$@"; exit;;
-        r*)  is_repo; restore "$@"; exit;;
-        l*)  is_repo; list    "$@"; exit;;
-        *) echo "invalid operation: $cmd;" >&2
-           exit 1;;
+        f*) isfull=1; backup  "$@"; exit;;
+        i*) is_repo;  backup  "$@"; exit;;
+        r*) is_repo;  restore "$@"; exit;;
+        l*) is_repo;  list    "$@"; exit;;
+        *) exits "invalid operation: $cmd";;
     esac
 }
 
