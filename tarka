@@ -1,10 +1,11 @@
 #!/bin/sh
-# backup
 #
-# incremental backups using tar rsync
-# works transparently over ssh by mounting with sshfs
-# unencrypted files are never visible on the remote
+# incremental backups using tar and rsync
+# works transparently over SSH by mounting with sshfs
+# unencrypted files are never exposed on the remote system
+# root privileges are required to preserve permissions (see tar man page for -p)
 #
+#set -x
 
 parse() {
     set -- "$(basename "$1")"
@@ -87,7 +88,7 @@ untar() {
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i..."
-        tar xf "$i" -C "$temp/" -G
+        tar -xpf "$i" -C "$temp/" -G
     done
     if ! test -e "$(extract_dir "$1" "$2")"; then
         echo "untar error; exiting" >&2
@@ -101,7 +102,7 @@ genhash() {
 
 list() {
     printf "%-40s %-30s %-8s %-4s %s\n" "src" "date" "hash" "nr" "tag"
-    for i in "$repo/$(realmangle $1)"*.gpg; do
+    for i in "$repo/${1+$(realmangle $1)}"*.gpg; do
         test -e "$i" || break
         parse "$i"
         printf "%-40s %-30s %8s %-4s %s\n" "$psrc" "$pdate" "$phash" "$pnr" "$ptag"
@@ -109,9 +110,7 @@ list() {
 }
 
 sync() {
-    # exit 0
-    rsync "${3--q}" -az --delete  "${1}" "${2}"
-    # --exclude-from="$0-ignore" \
+    rsync "${3--q}" -az --delete  "${1}" "${2}" #--exclude-from="$0-ignore"
 }
 
 targ() {
@@ -121,7 +120,7 @@ targ() {
         exit 1
     fi
     echo "-- taring with $snar..."
-    tar cf "${2}.tar" "${1}" -g  "$snar" -P --xform="s|^${temp}/||"
+    tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --xform="s|^${temp}/||"
     if ! test -e "${2}.tar"; then
         echo "targ error; exiting"
         exit 1
@@ -147,6 +146,7 @@ is_repo() {
 info_header() {
     printf "%-15s : %s\n" "temp" "$temp"
     printf "%-15s : %s\n" "tag" "$tag"
+    printf "%-15s : %s\n" "repo" "$repo"
     printf "%-15s : %s\n" "extract" "$xdir"
     printf "%-15s : %s\n" "latest" "$latest"
     printf "%-15s : %s\n" "destination" "$dst"
@@ -196,10 +196,12 @@ backup() {
         ungpg "$src" "$hash"
         untar "$src" "$hash"
     fi
+    echo "-- sync temp"
     sync "$src/" "$xdir"
     targ "$xdir" "$(dst "$temp")"
     encrypt "$(dst "$temp").tar"
-    sync "$(dst "$temp").tar.gpg" "$(dst "$repo").tar.gpg"
+    echo "-- sync $(dst "$repo").tar.gpg"
+    rsync -v "$(dst "$temp").tar.gpg" "$(dst "$repo").tar.gpg"
     rm -r "$xdir"
     rm -r "$temp"
 }
@@ -221,8 +223,10 @@ main() {
     temp=$(mktemp -d)
     if echo "$repo" | grep -q ':'; then
         sshtemp=$(mktemp -d)
-        ssh="ssh ${repo%:}"
-        sshfs "$repo" "$sshtemp"
+        if ! sshfs "$repo" "$sshtemp"; then
+            echo "error connecting with server; check auth; exiting;" >&2
+            exit 1
+        fi
         trap disconn EXIT
         repo="$sshtemp"
     else
