@@ -1,6 +1,9 @@
 #!/bin/sh
 # backup
+#
 # this script first unpacks any older incremental backups and then rsynces first
+# works transparently over ssh by mounting with sshfs for listing operations
+# but executes heavy io like untar on the host machine using directly ssh
 #
 
 parse() {
@@ -47,9 +50,12 @@ group() { # path hash
 }
 
 untar() {
+    echo "-- untar"
     for i in "$repo"/"$(mangle $1)"*"$2"*.tar; do
-        echo "untaring $i..."
-        tar xf "$i" -C "$repo/" -G
+        echo "$i..."
+        parse "$i"
+        test "$pnr" = "$3" && break
+        $ssh tar xf "$i" -C "$repo/" -G
     done
 }
 
@@ -62,9 +68,8 @@ genhash() {
 }
 
 list() {
-    mangle_path "$1"
     printf "%-40s %-30s %-8s %-4s %s\n" "src" "date" "hash" "nr" "tag"
-    for i in "$repo/${p}"*.tar; do
+    for i in "$repo/$(mangle $1)"*.tar; do
         test -e "$i" || break
         parse "$i"
         printf "%-40s %-30s %8s %-4s %s\n" "$psrc" "$pdate" "$phash" "$pnr" "$ptag"
@@ -73,14 +78,15 @@ list() {
 
 sync() {
     # exit 0
+    echo "-- syncing $2"
     rsync -avz --delete \
           "${1}/" \
           "${2}"
     # --exclude-from="$0-ignore" \
 }
 
-roll() {
-    tar cvf "${2}.tar" "${1}" -g "${1}.snar" --xform="s|^${repo}/||"
+targ() {
+    $ssh tar cvf "${2}.tar" "${1}" -g "${1}.snar" --xform="s|^${repo}/||"
 }
 
 usage() {
@@ -93,12 +99,24 @@ is_repo() {
 }
 
 restore() { # src hash
-    untar "$1" "$2"
+    if test -e "$1"; then
+        read -p "$1 will be overwritten; continue? (yes/n): " choice
+        test "$choice" != "yes" && exit 0
+    fi
+    untar "$1" "$2" "$3"
     if ! test -e "$(group "$1" "$2")"; then
         echo "untar error; exiting" >&2
         exit 1
     fi
     sync "$(group "$1" "$2")" "$1"
+    rm -rf "$(group "$1" "$2")"
+}
+
+disconn() {
+    ARG=$?
+    fusermount -u "$sshtemp"
+    rmdir "$sshtemp"
+    exit $ARG
 }
 
 main() {
@@ -110,9 +128,19 @@ main() {
     isres=0
 
     cmd="$1"
-    repo=${2%/}
-    is_repo
+    repo="$2"
+    temp=$(mktemp -d)
+    if echo "$repo" | grep -q ':'; then
+        sshtemp=$(mktemp -d)
+        ssh="ssh ${repo%:}"
+        sshfs "$repo" "$sshtemp"
+        trap disconn EXIT
+        repo="$sshtemp"
+    else
+        repo="$(realpath ${2%/})"
+    fi
     shift && shift
+    is_repo
     case "$cmd" in
         f*)  isfull=1 ;;
         i*)  isinc=1  ;;
@@ -145,10 +173,11 @@ main() {
     printf "%-15s : %s\n" "latest" "$latest"
     printf "%-15s : %s\n" "destination" "$dst"
     echo "----------"
+    exit 0
 
     test "$isfull" -eq 0 && untar "$src" "$hash"
     sync "$src" "$group"
-    roll "$group" "$dst"
+    targ "$group" "$dst"
     rm -rf "$group"
 }
 
