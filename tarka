@@ -144,8 +144,10 @@ EOF
 }
 
 is_repo() {
-    echo "repo doesn't exist;" >&2
-    test -e "$repo/.repo" || usage
+    if ! test -e "$repo/.repo"; then
+        echo "not backup repository; exiting" >&2
+        usage
+    fi
 }
 
 info_header() {
@@ -159,6 +161,9 @@ info_header() {
 }
 
 restore() { # src hash
+    test -n "$1" || usage
+    test -n "$2" || usage
+
     src="$(realpath "$1")"
     hash="$2"
     nr="$3"
@@ -178,6 +183,8 @@ restore() { # src hash
 
 
 backup() {
+    test -n "$1" || usage
+
     src="$(realpath $1)"
     tag=${2:-}
     date=$(date +'%Y-%m-%d__%H-%M.%S')
