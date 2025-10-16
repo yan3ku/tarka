@@ -1,0 +1,86 @@
+#!/bin/sh
+#
+#
+#
+#
+
+parse() {
+    rest="$(basename "$1")"
+    # shellcheck disable=SC2034
+    psrc="$(echo "~${rest%~*}~" | tr '~' '/')"
+    rest="${1##*~}"
+    # shellcheck disable=SC2034
+    pdate="${rest%=*}"
+    rest="${rest##*=}"
+    # shellcheck disable=SC2034
+    phash="${rest%!*}"
+    rest="${rest##*!}"
+    # shellcheck disable=SC2034
+    pnr="${rest%--*}"
+    pnr="${rest%.*}"
+    rest="${rest##*--}"
+    # shellcheck disable=SC2034
+    ptag="${rest}"
+
+    # echo "psrc $psrc"
+    # echo "date $pdate"
+    # echo "hash $phash"
+    # echo "pnr $pnr"
+}
+
+latest() {
+    latest=""
+    for i in "$repo"/"$1"*; do
+        [ "${i##*.}" != snar ] && latest="$i"
+    done
+}
+
+untar() {
+    for i in "$repo"/"$1"*"$2"*.tar; do
+        echo "untaring $i..."
+        tar xf "$i" -C "$repo/" -G
+    done
+}
+
+[ "$1" = full ] && isfull=1 && shift
+
+src=$(realpath "$1")
+repo=${2%/}
+tag=${3:-}
+date=$(date +'%Y-%m-%d__%H-%M')
+src_mangled="${src%/}"
+src_mangled=$(echo "${src_mangled#/}" | tr '/' '~')
+latest "$src_mangled"
+
+if [ -n "$isfull" ] || [ ! -e "$latest" ]; then
+    isfull=1
+    hash="$(date +%s | md5sum | head -c 8)"
+    nr="0"
+else
+    parse "$latest"
+    hash="$phash"
+    nr="$((pnr+1))"
+fi
+
+group="${repo}/${src_mangled}~${hash}"
+dst="${repo}/${src_mangled}~${date}=${hash}!${nr}${tag:+--}${tag}"
+
+[ -z "$isfull" ] && untar "$src_mangled" "$hash"
+# exit 0
+
+echo "----------"
+printf "%-15s : %s\n" "group" "$group"
+printf "%-15s : %s\n" "latest" "$latest"
+printf "%-15s : %s\n" "destination" "$dst"
+echo "----------"
+
+# exit 0
+rsync -avz \
+      "$src/" \
+      "${group}"
+
+# --exclude-from="$0-ignore" \
+
+tar cvf "$dst.tar" "${group}" -g "${group}.snar" --xform="s|^${repo}/||"
+rm -rf "${group}"
+echo "-- ok"
