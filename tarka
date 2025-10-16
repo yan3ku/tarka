@@ -2,8 +2,9 @@
 # backup
 #
 # this script first unpacks any older incremental backups and then rsynces first
-# works transparently over ssh by mounting with sshfs for listing operations
-# but executes heavy io like untar on the host machine using directly ssh
+# works transparently over ssh by mounting with sshfs
+# all unpacking happens in temp dir outside ssh being secure
+# TODO: add gpg encryption
 #
 
 parse() {
@@ -16,10 +17,10 @@ parse() {
     phash="${phash%!*}"
     pnr="${pmeta#*!}"
     pnr="${pnr%--*}"
-    pnr="${pnr%.*}"
+    pnr="${pnr%%.*}"
     ptag="${pmeta#*!}"
     ptag="${ptag#*--}"
-    ptag="${ptag%.*}"
+    ptag="${ptag%%.*}"
     test "$ptag" = "$pnr" && ptag=""
 
     # echo "psrc $psrc"
@@ -46,21 +47,17 @@ latest() {
 }
 
 group() { # path hash
-    printf "%s" "${repo}/$(mangle "$1")~$2"
+    printf "%s" "${temp}/$(mangle "$1")~$2"
 }
 
 untar() {
     echo "-- untar"
     for i in "$repo"/"$(mangle $1)"*"$2"*.tar; do
-        echo "$i..."
         parse "$i"
-        test "$pnr" = "$3" && break
-        $ssh tar xf "$i" -C "$repo/" -G
+        test "$pnr" -gt "${3-2137}" && break
+        echo "$i..."
+        tar xf "$i" -C "$temp/" -G
     done
-}
-
-realsrc() {
-    mangle "$(realpath "$1")"
 }
 
 genhash() {
@@ -86,7 +83,13 @@ sync() {
 }
 
 targ() {
-    $ssh tar cvf "${2}.tar" "${1}" -g "${1}.snar" --xform="s|^${repo}/||"
+    snar="$repo/${1#$temp/}.snar"
+    if test "$isfull" -eq 0 && ! test -e "$snar"; then
+        echo "targ; snar at $snar doesn't exist; exiting"
+        exit 1
+    fi
+    echo "-- taring with $snar..."
+    tar cf "${2}.tar" "${1}" -g  "$snar" -P --xform="s|^${temp}/||"
 }
 
 usage() {
@@ -104,6 +107,7 @@ restore() { # src hash
         test "$choice" != "yes" && exit 0
     fi
     untar "$1" "$2" "$3"
+    echo "$(group "$1" "$2")"
     if ! test -e "$(group "$1" "$2")"; then
         echo "untar error; exiting" >&2
         exit 1
@@ -168,12 +172,12 @@ main() {
     group=$(group "$src" "$hash") # target for sync and the tar source
     dst="${repo}/$(mangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}" # target for tar dst
 
+    printf "%-15s : %s\n" "temp" "$temp"
     printf "%-15s : %s\n" "tag" "$tag"
     printf "%-15s : %s\n" "group" "$group"
     printf "%-15s : %s\n" "latest" "$latest"
     printf "%-15s : %s\n" "destination" "$dst"
     echo "----------"
-    exit 0
 
     test "$isfull" -eq 0 && untar "$src" "$hash"
     sync "$src" "$group"
