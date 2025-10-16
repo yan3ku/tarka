@@ -7,7 +7,8 @@
 #
 #set -x
 
-parse() {
+parse() { # parse backup file name and their metadata eg:
+# home~yaneko~devel~tarka~test-in~2025-10-16__16-22.39=fb63256f!0.tar.gpg
     set -- "$(basename "$1")"
     psrc="$(echo "~${1%~*}~" | tr '~' '/')"
     pmeta="${1##*~}"
@@ -30,7 +31,7 @@ parse() {
     # echo "pnr $ptag"
 }
 
-mangle() {
+mangle() {  # mangle directory to use as backup filename
     mangle="${1%/}"
     mangle="$(echo "${mangle#/}" | tr '/' '~')"
     printf "%s" "$mangle"
@@ -40,7 +41,7 @@ realmangle() {
     mangle "$(realpath "$1")"
 }
 
-latest() {
+latest() { # latest backup for directory
     latest=""
     for i in "$repo"/"$(realmangle $1)"*; do
         if test "${i##*.}" != snar; then
@@ -50,19 +51,20 @@ latest() {
     printf "%s" "$latest"
 }
 
-extract_dir() { # path hash
+
+merge_dir() { # path hash | directory for merging tars aka extract dir
     printf "%s" "${fetchdir}/$(realmangle "$1")~$2"
 }
 
-dst() {
-    printf "%s" "$(realmangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}" # target for tar dst
+dst() { # destination name for new backup
+    printf "%s" "$(realmangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}"
 }
 
 encrypt() {
     gpg -q --pinentry-mode=loopback --passphrase "asdf" --symmetric --cipher-algo AES256 "$@"
 }
 
-fetch() {
+fetch() { # fetches from sshfs
     [ "$repo" = "$fetchdir" ] && return
     echo "-- fetch"
     for i in "$repo"/"$(realmangle $1)"*"$2"*.gpg; do
@@ -92,13 +94,13 @@ untar() {
         tar -xpf "$i" -C "$fetchdir/" -G
         rm "$i"
     done
-    if ! test -e "$(extract_dir "$1" "$2")"; then
+    if ! test -e "$(merge_dir "$1" "$2")"; then
         echo "untar error; exiting" >&2
         exit 1
     fi
 }
 
-genhash() {
+genhash() { # each set of incremental backups is grouped by hash
     date +%s | md5sum | head -c 8
 }
 
@@ -115,7 +117,7 @@ sync() {
     rsync "${3--q}" -az --delete  "${1}" "${2}" #--exclude-from="$0-ignore"
 }
 
-targ() {
+targ() { # tar with -g
     snar="$repo/${1#$fetchdir/}.snar"
     if test "$isfull" -eq 0 && ! test -e "$snar"; then
         echo "targ; snar at $snar doesn't exist; exiting"
@@ -170,8 +172,8 @@ restore() { # src hash
     ungpg "$src" "$hash" "$nr"
     untar "$src" "$hash" "$nr"
     echo "-- restore $src"
-    sync "$(extract_dir "$src" "$hash")/" "$src" -v
-    rm -r "$(extract_dir "$src" "$hash")"
+    sync "$(merge_dir "$src" "$hash")/" "$src" -v
+    rm -r "$(merge_dir "$src" "$hash")"
 }
 
 
@@ -192,7 +194,7 @@ backup() {
     fi
 
     mkdir -p "$fetchdir"
-    xdir=$(extract_dir "$src" "$hash") # target for sync and the tar source
+    xdir=$(merge_dir "$src" "$hash") # target for sync and the tar source
     info_header # debug info
     if test "$isfull" -eq 0; then
         fetch "$src" "$hash"
