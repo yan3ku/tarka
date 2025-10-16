@@ -47,7 +47,7 @@ group() { # path hash
 }
 
 untar() {
-    for i in "$repo"/"$(mangle 1)"*"$2"*.tar; do
+    for i in "$repo"/"$(mangle $1)"*"$2"*.tar; do
         echo "untaring $i..."
         tar xf "$i" -C "$repo/" -G
     done
@@ -92,8 +92,13 @@ is_repo() {
     test -e "$repo/.repo" || usage
 }
 
-restore() {
+restore() { # src hash
     untar "$1" "$2"
+    if ! test -e "$(group "$1" "$2")"; then
+        echo "untar error; exiting" >&2
+        exit 1
+    fi
+    sync "$(group "$1" "$2")" "$1"
 }
 
 main() {
@@ -111,8 +116,8 @@ main() {
     case "$cmd" in
         f*)  isfull=1 ;;
         i*)  isinc=1  ;;
-        r*)  isres=1  ;;
-        l*)  list "$@"; exit;;
+        r*)  restore  "$@"; exit;;
+        l*)  list "$@";     exit;;
         *) echo "invalid operation: $cmd;" >&2
            exit 1;;
     esac
@@ -132,8 +137,8 @@ main() {
         nr="$((pnr+1))"
     fi
 
-    group=$(group "$src" "$hash")
-    dst="${repo}/$(mangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}"
+    group=$(group "$src" "$hash") # target for sync and the tar source
+    dst="${repo}/$(mangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}" # target for tar dst
 
     printf "%-15s : %s\n" "tag" "$tag"
     printf "%-15s : %s\n" "group" "$group"
@@ -141,7 +146,7 @@ main() {
     printf "%-15s : %s\n" "destination" "$dst"
     echo "----------"
 
-    test -z "$isfull" && untar "$(mangle src)" "$hash"
+    test "$isfull" -eq 0 && untar "$src" "$hash"
     sync "$src" "$group"
     roll "$group" "$dst"
     rm -rf "$group"
