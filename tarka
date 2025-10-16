@@ -2,93 +2,70 @@
 # backup
 # this script first unpacks any older incremental backups and then rsynces first
 #
-# set -xe
 
 parse() {
-    rest="$(basename "$1")"
+    set -- "$(basename "$1")"
+    psrc="$(echo "~${1%~*}~" | tr '~' '/')"
+    pmeta="${1##*~}"
 
-    psrc="$(echo "~${rest%~*}~" | tr '~' '/')"
-    rest="${1##*~}"
-
-    pdate="${rest%=*}"
-    rest="${rest##*=}"
-
-    phash="${rest%!*}"
-    rest="${rest##*!}"
-
-    # cut after -- and extension
-    pnr="${rest%--*}"
+    pdate="${pmeta%=*}"
+    phash="${pmeta##*=}"
+    phash="${phash%!*}"
+    pnr="${pmeta#*!}"
+    pnr="${pnr%--*}"
     pnr="${pnr%.*}"
-
-    rest="${rest##*--}"
-    rest="${rest%.*}"
-    if [ "$pnr" = "$rest" ];then
-        ptag=""
-        return
-    fi
-
-    ptag="${rest}"
+    ptag="${pmeta#*!}"
+    ptag="${ptag#*--}"
+    ptag="${ptag%.*}"
+    test "$ptag" = "$pnr" && ptag=""
 
     # echo "psrc $psrc"
     # echo "date $pdate"
     # echo "hash $phash"
     # echo "pnr $pnr"
+    # echo "pnr $ptag"
+}
+
+mangle() {
+    mangle="${1%/}"
+    mangle="$(echo "${mangle#/}" | tr '/' '~')"
+    printf "%s" "$mangle"
 }
 
 latest() {
     latest=""
-    for i in "$repo"/"$1"*; do
-        [ "${i##*.}" != snar ] && latest="$i"
+    for i in "$repo"/"$(mangle $1)"*; do
+        if test "${i##*.}" != snar; then
+            latest="$i"
+        fi
     done
+    printf "%s" "$latest"
+}
+
+group() { # path hash
+    printf "%s" "${repo}/$(mangle "$1")~$2"
 }
 
 untar() {
-    for i in "$repo"/"$1"*"$2"*.tar; do
+    for i in "$repo"/"$(mangle 1)"*"$2"*.tar; do
         echo "untaring $i..."
         tar xf "$i" -C "$repo/" -G
     done
 }
 
-mangle_path() {
-    p="${1%/}"
-    p="$(echo "${p#/}" | tr '/' '~')"
-}
-
-setsrc() {
-    src=$(realpath "$1")
-    mangle_path "$src"
-    src_mangled="$p"
+realsrc() {
+    mangle "$(realpath "$1")"
 }
 
 genhash() {
     date +%s | md5sum | head -c 8
 }
 
-# setargs SRC [TAG]
-setargs() {
-    setsrc "$1"
-    tag=${2:-}
-    date=$(date +'%Y-%m-%d__%H-%M.%S')
-    latest "$src_mangled"
-
-    if [ -n "$isfull" ] || [ ! -e "$latest" ]; then
-        isfull=1
-        hash="$(genhash)"
-        nr="0"
-    else
-        parse "$latest"
-        hash="$phash"
-        nr="$((pnr+1))"
-    fi
-
-    group="${repo}/${src_mangled}~${hash}"
-    dst="${repo}/${src_mangled}~${date}=${hash}!${nr}${tag:+--}${tag}"
-}
-
 list() {
     mangle_path "$1"
     printf "%-40s %-30s %-8s %-4s %s\n" "src" "date" "hash" "nr" "tag"
     for i in "$repo/${p}"*.tar; do
+        test -e "$i" || break
         parse "$i"
         printf "%-40s %-30s %8s %-4s %s\n" "$psrc" "$pdate" "$phash" "$pnr" "$ptag"
     done
@@ -116,29 +93,47 @@ is_repo() {
 }
 
 restore() {
-
+    untar "$1" "$2"
 }
 
 main() {
     test -n "$1" || usage
     test -n "$2" || usage
 
+    isfull=0
+    isinc=0
+    isres=0
+
     cmd="$1"
     repo=${2%/}
     is_repo
     shift && shift
     case "$cmd" in
-        f*)  isfull=1  && break;;
-        i*)  isinc=1   && break;;
-        r*)  isres=1   && break;;
-        l*)  list "$@" && exit;;
+        f*)  isfull=1 ;;
+        i*)  isinc=1  ;;
+        r*)  isres=1  ;;
+        l*)  list "$@"; exit;;
         *) echo "invalid operation: $cmd;" >&2
            exit 1;;
     esac
-    src="$1"
-    tag="$2"
 
-    setargs "$src" "$2"
+    src="$(realpath $1)"
+    tag=${2:-}
+    date=$(date +'%Y-%m-%d__%H-%M.%S')
+    latest=$(latest "$src")
+
+    if test "$isfull" -eq 1 || test ! -e "$latest"; then
+        isfull=1
+        hash="$(genhash)"
+        nr="0"
+    else
+        parse "$latest"
+        hash="$phash"
+        nr="$((pnr+1))"
+    fi
+
+    group=$(group "$src" "$hash")
+    dst="${repo}/$(mangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}"
 
     printf "%-15s : %s\n" "tag" "$tag"
     printf "%-15s : %s\n" "group" "$group"
@@ -146,10 +141,10 @@ main() {
     printf "%-15s : %s\n" "destination" "$dst"
     echo "----------"
 
-    [ -z "$isfull" ] && untar "$src_mangled" "$hash"
+    test -z "$isfull" && untar "$(mangle src)" "$hash"
     sync "$src" "$group"
     roll "$group" "$dst"
-    rm -rf "${group}"
+    rm -rf "$group"
 }
 
 main "$@"
