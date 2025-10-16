@@ -51,11 +51,11 @@ latest() {
 }
 
 extract_dir() { # path hash
-    printf "%s" "${temp}/$(realmangle "$1")~$2"
+    printf "%s" "${fetchdir}/$(realmangle "$1")~$2"
 }
 
 dst() {
-    printf "%s" "${1}/$(realmangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}" # target for tar dst
+    printf "%s" "$(realmangle $src)~${date}=${hash}!${nr}${tag:+--}${tag}" # target for tar dst
 }
 
 encrypt() {
@@ -63,18 +63,19 @@ encrypt() {
 }
 
 fetch() {
+    [ "$repo" = "$fetchdir" ] && return
     echo "-- fetch"
     for i in "$repo"/"$(realmangle $1)"*"$2"*.gpg; do
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i"
-        sync "$i" "$temp/${i#$repo}" || exit 1
+        sync "$i" "$fetchdir/${i#$repo}" || exit 1
     done
 }
 
 ungpg() {
     echo "-- ungpg"
-    for i in "$temp"/"$(realmangle $1)"*"$2"*.gpg; do
+    for i in "$fetchdir"/"$(realmangle $1)"*"$2"*.gpg; do
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i..."
@@ -84,11 +85,12 @@ ungpg() {
 
 untar() {
     echo "-- untar"
-    for i in "$temp"/"$(realmangle $1)"*"$2"*.tar; do
+    for i in "$fetchdir"/"$(realmangle $1)"*"$2"*.tar; do
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i..."
-        tar -xpf "$i" -C "$temp/" -G
+        tar -xpf "$i" -C "$fetchdir/" -G
+        rm "$i"
     done
     if ! test -e "$(extract_dir "$1" "$2")"; then
         echo "untar error; exiting" >&2
@@ -114,13 +116,13 @@ sync() {
 }
 
 targ() {
-    snar="$repo/${1#$temp/}.snar"
+    snar="$repo/${1#$fetchdir/}.snar"
     if test "$isfull" -eq 0 && ! test -e "$snar"; then
         echo "targ; snar at $snar doesn't exist; exiting"
         exit 1
     fi
-    echo "-- taring with $snar..."
-    tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --xform="s|^${temp}/||"
+    echo "-- tar with $snar..."
+    tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --xform="s|^${fetchdir}/||"
     if ! test -e "${2}.tar"; then
         echo "targ error; exiting"
         exit 1
@@ -140,16 +142,17 @@ EOF
 }
 
 is_repo() {
+    echo "repo doesn't exist;" >&2
     test -e "$repo/.repo" || usage
 }
 
 info_header() {
-    printf "%-15s : %s\n" "temp" "$temp"
+    printf "%-15s : %s\n" "temp" "$fetchdir"
     printf "%-15s : %s\n" "tag" "$tag"
     printf "%-15s : %s\n" "repo" "$repo"
     printf "%-15s : %s\n" "extract" "$xdir"
     printf "%-15s : %s\n" "latest" "$latest"
-    printf "%-15s : %s\n" "destination" "$dst"
+    printf "%-15s : %s\n" "destination" "$(dst)"
     echo "----------"
 }
 
@@ -188,22 +191,23 @@ backup() {
         nr="$((pnr+1))"
     fi
 
+    mkdir -p "$fetchdir"
     xdir=$(extract_dir "$src" "$hash") # target for sync and the tar source
-    dst=$(dst "$temp")
     info_header # debug info
     if test "$isfull" -eq 0; then
         fetch "$src" "$hash"
         ungpg "$src" "$hash"
         untar "$src" "$hash"
     fi
-    echo "-- sync temp"
+    echo "-- sync fetch dir"
     sync "$src/" "$xdir"
-    targ "$xdir" "$(dst "$temp")"
-    encrypt "$(dst "$temp").tar"
-    echo "-- sync $(dst "$repo").tar.gpg"
-    rsync -v "$(dst "$temp").tar.gpg" "$(dst "$repo").tar.gpg"
+    targ "$xdir" "$fetchdir/$(dst)"
+    encrypt "$fetchdir/$(dst)".tar
+    echo "-- sync $repo/$repo.tar.gpg"
+    rsync -v "$fetchdir/$(dst)".tar.gpg "$repo/$(dst).tar.gpg"
+    touch "$repo/.repo"
     rm -r "$xdir"
-    rm -r "$temp"
+    rm "$fetchdir/$(dst).tar"
 }
 
 disconn() {
@@ -220,8 +224,8 @@ main() {
     isfull=0
     cmd="$1"
     repo="$2"
-    temp=$(mktemp -d)
     if echo "$repo" | grep -q ':'; then
+        fetchdir=$(mktemp -d)
         sshtemp=$(mktemp -d)
         if ! sshfs "$repo" "$sshtemp"; then
             echo "error connecting with server; check auth; exiting;" >&2
@@ -231,6 +235,7 @@ main() {
         repo="$sshtemp"
     else
         repo="$(realpath ${2%/})"
+        fetchdir="${repo}"
     fi
     shift && shift
     case "$cmd" in
