@@ -1,24 +1,32 @@
 #!/bin/sh
-#
+# backup
+# this script first unpacks any older incremental backups and then rsynces first
 #
 # set -xe
 
 parse() {
     rest="$(basename "$1")"
-    # shellcheck disable=SC2034
+
     psrc="$(echo "~${rest%~*}~" | tr '~' '/')"
     rest="${1##*~}"
-    # shellcheck disable=SC2034
+
     pdate="${rest%=*}"
     rest="${rest##*=}"
-    # shellcheck disable=SC2034
+
     phash="${rest%!*}"
     rest="${rest##*!}"
-    # shellcheck disable=SC2034
+
+    # cut after -- and extension
     pnr="${rest%--*}"
-    pnr="${rest%.*}"
+    pnr="${pnr%.*}"
+
     rest="${rest##*--}"
-    # shellcheck disable=SC2034
+    rest="${rest%.*}"
+    if [ "$pnr" = "$rest" ];then
+        ptag=""
+        return
+    fi
+
     ptag="${rest}"
 
     # echo "psrc $psrc"
@@ -52,7 +60,11 @@ setsrc() {
     src_mangled="$p"
 }
 
-# setargs REPO SRC [TAG]
+genhash() {
+    date +%s | md5sum | head -c 8
+}
+
+# setargs SRC [TAG]
 setargs() {
     setsrc "$1"
     tag=${2:-}
@@ -61,7 +73,7 @@ setargs() {
 
     if [ -n "$isfull" ] || [ ! -e "$latest" ]; then
         isfull=1
-        hash="$(date +%s | md5sum | head -c 8)"
+        hash="$(genhash)"
         nr="0"
     else
         parse "$latest"
@@ -75,10 +87,10 @@ setargs() {
 
 list() {
     mangle_path "$1"
-    printf "%-40s %-30s %s\n" "src" "date" "nr"
-    for i in "$repo/"${p}*.tar; do
+    printf "%-40s %-30s %-8s %-4s %s\n" "src" "date" "hash" "nr" "tag"
+    for i in "$repo/${p}"*.tar; do
         parse "$i"
-        printf "%-40s %-30s %s\n" "$psrc" "$pdate" "$pnr"
+        printf "%-40s %-30s %8s %-4s %s\n" "$psrc" "$pdate" "$phash" "$pnr" "$ptag"
     done
 }
 
@@ -99,29 +111,42 @@ usage() {
     exit 1
 }
 
+is_repo() {
+    test -e "$repo/.repo" || usage
+}
+
+restore() {
+
+}
+
 main() {
     test -n "$1" || usage
     test -n "$2" || usage
 
     cmd="$1"
-    shift
-    repo=${1%/}
+    repo=${2%/}
+    is_repo
+    shift && shift
     case "$cmd" in
-        f*)  isfull=1 && shift && break;;
-        i*)  isinc=1  && shift && break;;
-        l*)  isls=1   && list "$@" && exit;;
+        f*)  isfull=1  && break;;
+        i*)  isinc=1   && break;;
+        r*)  isres=1   && break;;
+        l*)  list "$@" && exit;;
         *) echo "invalid operation: $cmd;" >&2
            exit 1;;
     esac
+    src="$1"
+    tag="$2"
 
-    setargs "$1" "$2"
-    # [ -z "$isfull" ] && untar "$src_mangled" "$hash"
+    setargs "$src" "$2"
 
+    printf "%-15s : %s\n" "tag" "$tag"
     printf "%-15s : %s\n" "group" "$group"
     printf "%-15s : %s\n" "latest" "$latest"
     printf "%-15s : %s\n" "destination" "$dst"
     echo "----------"
 
+    [ -z "$isfull" ] && untar "$src_mangled" "$hash"
     sync "$src" "$group"
     roll "$group" "$dst"
     rm -rf "${group}"
