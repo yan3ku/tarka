@@ -11,6 +11,20 @@
 #
 #set -x
 
+usage() {
+    cat >&2 <<EOF
+$0 cmd repo [src] [hash] [nr]
+cmd:
+    full
+    increment
+    restore
+    list
+    delete
+    keep [src] [yearly] [montly] [weekly]
+EOF
+    exit 1
+}
+
 passprompt() {
     stty -echo
     printf "Backup password: "
@@ -189,20 +203,6 @@ targ() { # tar with -g
     test "$isfull" -eq 0 && ! test -e "$snar" && exits "snar at $snar doesn't exist"
     echo "-- tar with $snar..."
     tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
-}
-
-usage() {
-    cat >&2 <<EOF
-$0 cmd repo [src] [hash] [nr]
-cmd:
-    full
-    increment
-    restore
-    list
-    delete
-    keep [src] [yearly] [montly] [weekly]
-EOF
-    exit 1
 }
 
 is_repo() {
