@@ -18,8 +18,9 @@ passprompt() {
 }
 
 cleanup() {
-    rm "$repo/.lock"
-    # test -e "$fetchdir/$(dst).tar" && rm -r "$fetchdir/$(dst).tar"
+    echo "-- cleaning up"
+    rm -f "$repo/.lock"
+    rm -f "$repo/*.tar"
 }
 
 parse() { # parse backup file name and their metadata eg:
@@ -37,13 +38,13 @@ parse() { # parse backup file name and their metadata eg:
     ptag="${pmeta#*!}"
     ptag="${ptag#*--}"
     ptag="${ptag%%.*}"
-    test "$ptag" = "$pnr" && ptag=""
+    test "$pmeta" = "${pmeta#*--*}" && ptag=""
 
     # echo "psrc $psrc"
     # echo "date $pdate"
     # echo "hash $phash"
-    # echo "pnr $pnr"
-    # echo "pnr $ptag"
+    # echo "pnr  $pnr"
+    # echo "ptag $ptag"
 }
 
 mangle() {  # mangle directory to use as backup filename
@@ -84,10 +85,18 @@ encrypt() {
     gpg -q --batch --passphrase "$pass" --symmetric --cipher-algo AES256 "$@" || exits "gpg encrypt error"
 }
 
+isthere() {
+    for i in "$repo"/"$(realmangle $1)"*"$2"*.gpg; do
+        test -e "$i" || exits "backup for $1 $2 doesn't exist"
+        break
+    done
+}
+
 fetch() { # fetches from sshfs
     [ "$repo" = "$fetchdir" ] && return
     echo "-- fetch"
     for i in "$repo"/"$(realmangle $1)"*"$2"*.gpg; do
+        test -e "$i" || exits "backup for $1 $2 doesn't exist"
         parse "$i"
         test "$pnr" -gt "${3-2137}" && break
         echo "$i"
@@ -117,21 +126,32 @@ untar() {
     test -e "$(merge_dir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
 
+rand() {
+    tr -dc a-z0-9 </dev/urandom | head -c 8
+}
+
 genhash() { # each set of incremental backups is grouped by hash
-    hash=$(date +%s | md5sum | head -c 8)
-    hash="bcab3cb1"
-    while "$repo/$(realmangle $src)"*"$hash"*.gpg; do
-        hash=$(date +%s | md5sum | head -c 8)
+    hash=
+    while test -z "$hash"; do
+        rand="$(rand)"
+        for i in "$repo/$(realmangle $src)"*"$rand"*.gpg; do
+            test -e "$i" || hash="$rand"
+            break
+        done
     done
     printf "%s" "$hash"
 }
 
 list() {
-    printf "%-40s %-30s %-8s %-4s %s\n" "src" "date" "hash" "nr" "tag"
+    fmt="%-40s\t%12s %-5s\t%8s %02s\t%s\n"
+    printf "$fmt"  "src" "day" "hour" "hash" "nr" "tag"
     for i in "$repo/${1+$(realmangle $1)}"*.gpg; do
         test -e "$i" || break
         parse "$i"
-        printf "%-40s %-30s %8s %-4s %s\n" "$psrc" "$pdate" "$phash" "$pnr" "$ptag"
+        pdate="${pdate%.*}"
+        pday="${pdate%__*}"
+        phour="${pdate#*__}"
+        printf "$fmt" "$psrc" "$pday" "$phour" "$phash" "$pnr" "$ptag"
     done
 }
 
@@ -140,7 +160,7 @@ sync() {
 }
 
 targ() { # tar with -g
-    snar="$repo/${1#$fetchdir/}.snar"
+    snar="$repo/~${1#$fetchdir/}.snar"
     test "$isfull" -eq 0 && ! test -e "$snar" && exits "snar at $snar doesn't exist"
     echo "-- tar with $snar..."
     tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
@@ -166,12 +186,11 @@ is_repo() {
 }
 
 info_header() {
-    printf "%-15s : %s\n" "temp" "$fetchdir"
-    printf "%-15s : %s\n" "tag" "$tag"
-    printf "%-15s : %s\n" "repo" "$repo"
-    printf "%-15s : %s\n" "extract" "$xdir"
-    printf "%-15s : %s\n" "latest" "$latest"
-    printf "%-15s : %s\n" "destination" "$(dst)"
+    printf "%-10s : %s\n" "repo" "$repo"
+    printf "%-10s : %s\n" "fetch" "$fetchdir"
+    printf "%-10s : %s\n" "merge" "$xdir"
+    printf "%-10s : %s\n" "dest" "$(dst)"
+    test -n "$latest" && printf "%-10s : %s\n" "latest" "$latest"
     echo "----------"
 }
 
@@ -179,28 +198,29 @@ restore() { # src hash
     test -n "$1" || usage
     test -n "$2" || usage
 
-    passprompt
     src="$(realpath "$1")"
     hash="$2"
     nr="$3"
+    xdir="$(merge_dir "$src" "$hash")/"
 
+    isthere "$src" "$hash"
+    info_header # debug info
     if test -e "$src"; then
         read -p "$src will be overwritten; continue? (yes/n): " choice
         test "$choice" != "yes" && exit 0
     fi
-    info_header # debug info
+    passprompt
     fetch "$src" "$hash" "$nr"
     ungpg "$src" "$hash" "$nr"
     untar "$src" "$hash" "$nr"
     echo "-- restore $src"
-    sync "$(merge_dir "$src" "$hash")/" "$src" -v
-    rm -r "$(merge_dir "$src" "$hash")"
+    sync "$xdir" "$src" -v
+    rm -r "$xdir"
 }
 
 backup() {
     test -n "$1" || usage
 
-    passprompt
     src="$(realpath $1)"
     tag=${2:-}
     # %S is needed for correct ordering just in case of multiple backups in the same minut
@@ -219,8 +239,10 @@ backup() {
 
     mkdir -p "$fetchdir"
     xdir=$(merge_dir "$src" "$hash") # target for sync and the tar source
+
+    isthere "$src" "$hash"
     info_header # debug info
-    exit 0
+    passprompt
     if test "$isfull" -eq 0; then
         fetch "$src" "$hash"
         ungpg "$src" "$hash"
@@ -231,7 +253,7 @@ backup() {
     targ "$xdir" "$fetchdir/$(dst)"
     encrypt "$fetchdir/$(dst)".tar
     echo "-- sync $repo/$repo.tar.gpg"
-    rsync -v "$fetchdir/$(dst)".tar.gpg "$repo/$(dst).tar.gpg"
+    rsync -v "$fetchdir/$(dst).tar.gpg" "$repo/$(dst).tar.gpg"
     touch "$repo/.repo"
     rm -r "$xdir"
     rm "$fetchdir/$(dst).tar"
@@ -239,9 +261,10 @@ backup() {
 
 disconn() {
     arg=$?
+    cleanup
     fusermount -u "$repo"
     rmdir "$repo"
-    cleanup
+    rm -r "$fetchdir"
     exit $arg
 }
 
@@ -266,7 +289,7 @@ main() {
     esac
     shift 2
     test -e "$repo/.lock" && exits "backup repository is locked; either wait for job to finish or delete .lock"
-    touch "$repo/.lock"
+    touch "$repo/.lock" || exits "couldn't create lock file"
     case "$cmd" in
         f*) isfull=1; backup  "$@"; exit;;
         i*) is_repo;  backup  "$@"; exit;;
