@@ -69,6 +69,13 @@ parse() { # parse backup file name and their metadata eg:
     # echo "ptag $ptag"
 }
 
+parsedate() { # extension for parse not needed in general case
+    pyear="${pday%-*}"
+    pmonth="${pday#*-}"
+    pmonth="${pmonth%-*}"
+    pweek="${pday##*-}"
+}
+
 mangle() {  # mangle directory to use as backup filename
     mangle="${1%/}"
     mangle="$(echo "${mangle#/}" | tr '/' '~')"
@@ -304,19 +311,37 @@ delete() {
 }
 
 keep_in() {
-    count=0
-    for i in "$repo"/*.gpg; do
+    src="$1"
+    by="$2"
+    left="$3"
+    tokeep=
+    set --;
+    for i in "$repo"/"$(realmangle $src)"*.gpg; do
+        set -- "$i" "$@"
+    done;
+    last=
+    for i; do
         parse "$i"
+        parsedate
+        if test "$last" != "$pyear"; then # replace this with the thing passed in call
+            left=$((left-1))
+            echo "$i"
+            tokeep="$i\n"
+            test "$left" -eq 0 && break
+        fi
+        last="$pyear"
     done
 }
 
 keep() {
     test -n "$1" || usage
     test -n "$2" || usage
-    test -n "$3" || usage
-    test -n "$4" || usage
+    # test -n "$3" || usage
+    # test -n "$4" || usage
 
     src="$(realpath "$1")"
+
+    keep_in "$src" "\$pyear" "$2"
 }
 
 disconn() {
