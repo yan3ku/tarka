@@ -5,7 +5,9 @@
 # unencrypted files are never exposed on the remote system
 # root privileges are required to preserve permissions (see tar man page for -p)
 #
-# TODO: cleanup
+# TODO: list command should list backup size
+# TODO: keep function for keeping in year month week n backups
+# TODO: test on directories with spaces?
 #
 #set -x
 
@@ -39,6 +41,10 @@ parse() { # parse backup file name and their metadata eg:
     ptag="${ptag#*--}"
     ptag="${ptag%%.*}"
     test "$pmeta" = "${pmeta#*--*}" && ptag=""
+
+    pdate="${pdate%.*}"
+    pday="${pdate%__*}"
+    phour="${pdate#*__}"
 
     # echo "psrc $psrc"
     # echo "date $pdate"
@@ -170,9 +176,6 @@ list() {
     for i in "$repo/${1+$(realmangle $1)}"*.gpg; do
         test -e "$i" || break
         parse "$i"
-        pdate="${pdate%.*}"
-        pday="${pdate%__*}"
-        phour="${pdate#*__}"
         printf "$fmt" "$psrc" "$pday" "$phour" "$phash" "$pnr" "$ptag"
     done
 }
@@ -190,12 +193,14 @@ targ() { # tar with -g
 
 usage() {
     cat >&2 <<EOF
-$0 cmd repo args
+$0 cmd repo [src] [hash] [nr]
 cmd:
     full
-    incremental
-    list
+    increment
     restore
+    list
+    delete
+    keep [src] [yearly] [montly] [weekly]
 EOF
     exit 1
 }
@@ -296,6 +301,22 @@ delete() {
     $rem "$src" "$hash" "$nr"
 }
 
+keep_in() {
+    count=0
+    for i in "$repo"/*.gpg; do
+        parse "$i"
+    done
+}
+
+keep() {
+    test -n "$1" || usage
+    test -n "$2" || usage
+    test -n "$3" || usage
+    test -n "$4" || usage
+
+    src="$(realpath "$1")"
+}
+
 disconn() {
     arg=$?
     cleanup
@@ -328,11 +349,12 @@ main() {
     test -e "$repo/.lock" && exits "backup repository is locked; either wait for job to finish or delete .lock"
     touch "$repo/.lock" || exits "couldn't create lock file"
     case "$cmd" in
-        f*) isfull=1; echo "-- full backup";        backup  "$@"; exit;;
-        i*) is_repo;  echo "-- incremental bakcup"; backup  "$@"; exit;;
-        r*) is_repo;  echo "-- restore backup";     restore "$@"; exit;;
-        del)is_repo;  echo "-- deleting";           delete  "$@"; exit;;
-        l*) is_repo;  list    "$@"; exit;;
+        f*)   isfull=1; echo "-- full";      backup  "$@"; exit;;
+        i*)   is_repo;  echo "-- increment"; backup  "$@"; exit;;
+        r*)   is_repo;  echo "-- restoring"; restore "$@"; exit;;
+        del)  is_repo;  echo "-- deleting";  delete  "$@"; exit;;
+        keep) is_repo;  echo "-- keeping";   keep    "$@"; exit;;
+        l*)   is_repo;  list    "$@"; exit;;
         *) exits "invalid operation: $cmd";;
     esac
 }
