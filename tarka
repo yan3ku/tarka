@@ -8,6 +8,8 @@
 # TODO: list command should list backup size
 # TODO: keep function for keeping in year month week n backups
 # TODO: test on directories with spaces?
+# TODO: encrypt snar
+# TODO: remove snar
 #
 #set -x
 
