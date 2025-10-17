@@ -4,12 +4,14 @@
 # works transparently over SSH by mounting with sshfs
 # unencrypted files are never exposed on the remote system
 # root privileges are required to preserve permissions (see tar man page for -p)
+# its posix shell right now because im weird
 #
 # TODO: list command should list backup size
 # TODO: keep function for keeping in year month week n backups
 # TODO: test on directories with spaces?
 # TODO: encrypt snar
 # TODO: remove snar
+# TODO: use bash things? (keep_in impossible in posix shell)
 #
 #set -x
 
@@ -73,7 +75,7 @@ parsedate() { # extension for parse not needed in general case
     pyear="${pday%-*}"
     pmonth="${pday#*-}"
     pmonth="${pmonth%-*}"
-    pweek="${pday##*-}"
+    pweek="$(date -d "$pday" +%U)"
 }
 
 mangle() {  # mangle directory to use as backup filename
@@ -312,38 +314,58 @@ delete() {
 
 keep_in() {
     src="$1"
-    by="$2"
-    left="$3"
+    lefty="$2"
+    leftm="$3"
+    leftw="$4"
+    # cutoffy=$(date -d "$2 years  ago"  +%Y-%m-%d)
+    # cutoffm=$(date -d "$3 months ago"  +%Y-%m-%d)
+    # cutoffw=$(date -d "$4 weeks  ago"  +%Y-%m-%d)
+    today="$(date +%Y-%m-%d)"
     tokeep=
     set --;
     for i in "$repo"/"$(realmangle "$src")"*.gpg; do
-        set -- "$i" "$@"
+        set -- "$(basename "$i")" "$@"
     done;
-    last=
+    lasty=
+    lastm=
+    lastw=
+    keep=0
+    # cutoff date should be applied
     for i; do
         parse "$i"
         parsedate
-        if test "$last" != "$pyear"; then # replace this with the thing passed in call
-            left=$((left-1))
-            echo "$i"
-            tokeep="$i\n"
-            test "$left" -eq 0 && break
+         # this checks must be cutoff at date n year n month n weeks ago
+        if test "$lefty" -gt 0 && test "$lasty" != "$pyear" ; then
+            lefty=$((lefty-1))
+            keep=1
         fi
-        last="$pyear"
+        if test "$leftm" -gt 0 && test "$lastm" != "$pmonth"; then
+            leftm=$((leftm-1))
+            keep=1
+        fi
+        if test "$leftw" -gt 0 && test "$lastw" != "$pweek" ; then
+            leftw=$((leftw-1))
+            keep=1
+        fi
+        test "$keep" -eq 1 && tokeep="$i $tokeep"
+        keep=0
+        lasty="$pyear"
+        lastm="$pmonth"
+        lastw="$pweek"
+    done
+    for file in $tokeep; do
+        echo "$file"
     done
 }
 
 keep() {
     test -n "$1" || usage
     test -n "$2" || usage
-    # test -n "$3" || usage
-    # test -n "$4" || usage
+    test -n "$3" || usage
+    test -n "$4" || usage
 
     src="$(realpath "$1")"
-
-    keep_in "$src" "\$pyear" "$2"
-    keep_in "$src" "\$pmonth" "$2"
-    keep_in "$src" "\$pyear" "$2"
+    keep_in "$src" "$2" "$3" "$4"
 }
 
 disconn() {
