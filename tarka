@@ -126,6 +126,28 @@ untar() {
     test -e "$(merge_dir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
 
+rem_latest() {
+    echo "-- LATEST TO REMOVE:"
+    latest="$(latest "$1" "$2")"
+    echo "$latest"
+    read -p "continue? (yes/n): " choice
+    test "$choice" != "yes" && exit 0
+    rm -f "$latest"
+}
+
+rem() {
+    echo "-- TO REMOVE:"
+    for i in "$repo"/"$(realmangle $1)"*"$2"*.gpg; do
+        test -e "$i" || exits "backup for $1 $2 doesn't exist"
+        echo "$i"
+    done
+    read -p "continue? (yes/n): " choice
+    test "$choice" != "yes" && exit 0
+    for i in "$repo"/"$(realmangle $1)"*"$2"*.gpg; do
+        rm -f "$i"
+    done
+}
+
 rand() {
     tr -dc a-z0-9 </dev/urandom | head -c 8
 }
@@ -206,7 +228,7 @@ restore() { # src hash
     isthere "$src" "$hash"
     info_header # debug info
     if test -e "$src"; then
-        read -p "$src will be overwritten; continue? (yes/n): " choice
+        read -p "$src CONTENT WILL BE DELETED; continue? (yes/n): " choice
         test "$choice" != "yes" && exit 0
     fi
     passprompt
@@ -240,7 +262,7 @@ backup() {
     mkdir -p "$fetchdir"
     xdir=$(merge_dir "$src" "$hash") # target for sync and the tar source
 
-    isthere "$src" "$hash"
+    test "$isfull" -eq 0 && isthere "$src" "$hash"
     info_header # debug info
     passprompt
     if test "$isfull" -eq 0; then
@@ -257,6 +279,21 @@ backup() {
     touch "$repo/.repo"
     rm -r "$xdir"
     rm "$fetchdir/$(dst).tar"
+}
+
+delete() {
+    test -n "$1" || usage
+    test -n "$2" || usage
+
+    src="$(realpath "$1")"
+    hash="$2"
+    nr="$3"
+    xdir="$(merge_dir "$src" "$hash")/"
+
+    isthere "$src" "$hash"
+    info_header # debug info
+    test -z "$3" && rem=rem || rem=rem_latest
+    $rem "$src" "$hash" "$nr"
 }
 
 disconn() {
@@ -291,9 +328,10 @@ main() {
     test -e "$repo/.lock" && exits "backup repository is locked; either wait for job to finish or delete .lock"
     touch "$repo/.lock" || exits "couldn't create lock file"
     case "$cmd" in
-        f*) isfull=1; backup  "$@"; exit;;
-        i*) is_repo;  backup  "$@"; exit;;
-        r*) is_repo;  restore "$@"; exit;;
+        f*) isfull=1; echo "-- full backup";        backup  "$@"; exit;;
+        i*) is_repo;  echo "-- incremental bakcup"; backup  "$@"; exit;;
+        r*) is_repo;  echo "-- restore backup";     restore "$@"; exit;;
+        del)is_repo;  echo "-- deleting";           delete  "$@"; exit;;
         l*) is_repo;  list    "$@"; exit;;
         *) exits "invalid operation: $cmd";;
     esac
