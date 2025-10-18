@@ -1,19 +1,25 @@
 #!/bin/sh
 #
-# Incremental backups using tar and rsync
+# Portable script to for backups using rsync, gpg and tar
+#
+# Commentary:
 # Works transparently over SSH by mounting with sshfs
 # Unencrypted files are never exposed on the remote system
 # Root privileges are required to preserve permissions (see tar man page for -p)
-# Portable POSIX shell script, so it can run on FreeBSD and other systems
-# Requires GNU date and tar
+# Due to the critical nature of this script, MAXIMIZE THE LINES OF CODE NOT WRITTEN.
 #
-# TODO: list command should list backup size
-# TODO: test keep_in (keep command)
-# TODO: test on directories with spaces?
-# TODO: encrypt snar
-# TODO: remove snar
-# TODO: checksums (with cksum or gpg sign functionality)
+# Requirements:
+# GNU date and tar
 #
+# TODO:
+# list command should list backup size
+# test keep_in (keep command)
+# test on directories with spaces?
+# encrypt snar
+# remove snar
+# checksums (with cksum or gpg sign functionality)
+#
+# Code:
 #set -x
 
 usage() {
