@@ -276,14 +276,14 @@ targ() { # tar with -g
     mv "$snar" "$dst.snr"
 }
 
-is_repo() {
+isrepo() {
     if ! test -e "$repo/.repo"; then
         echo "-- not backup repository; exiting" >&2
         usage
     fi
 }
 
-info_header() {
+info() {
     printf "%-10s : %s\n" "repo" "$repo"
     printf "%-10s : %s\n" "fetch" "$fetchdir"
     printf "%-10s : %s\n" "merge" "$xdir"
@@ -303,7 +303,7 @@ restore() { # src hash
     xdir="$(merge_dir "$src" "$hash")/"
 
     thereis "$src" "$hash"
-    info_header # debug info
+    info # debug info
     yesnp "$dst CONTENT WILL BE DELETED"
     passprompt
     fetch "$src" "$hash" "$nr"
@@ -337,7 +337,7 @@ backup() {
     xdir="$(merge_dir "$src" "$hash")" # target for sync and the tar source
 
     test "$isfull" -eq 0 && thereis "$src" "$hash"
-    info_header # debug info
+    info # debug info
     passprompt
     if test "$isfull" -eq 0; then
         fetch "$src" "$hash"
@@ -367,7 +367,7 @@ delete() {
     xdir="$(merge_dir "$src" "$hash")/"
 
     thereis "$src" "$hash"
-    info_header # debug info
+    info # debug info
     test -z "$3" && rem=remhash || rem=remhash_latest
     $rem "$src" "$hash"
 }
@@ -469,12 +469,12 @@ main() {
     touch "$repo/.lock" || exits "couldn't create lock file"
     case "$cmd" in
         f*)   isfull=1; echo "-- full";      backup  "$@"; exit;;
-        i*)   is_repo;  echo "-- increment"; backup  "$@"; exit;;
-        r*)   is_repo;  echo "-- restoring"; restore "$@"; exit;;
-        c*)   is_repo;  echo "-- checking";  check   "$@"; exit;;
-        del*) is_repo;  echo "-- deleting";  delete  "$@"; exit;;
-        keep) is_repo;  echo "-- keeping";   keep    "$@"; exit;;
-        l*)   is_repo;                       lists   "$@"; exit;;
+        i*)   isrepo;   echo "-- increment"; backup  "$@"; exit;;
+        r*)   isrepo;   echo "-- restoring"; restore "$@"; exit;;
+        c*)   isrepo;   echo "-- checking";  check   "$@"; exit;;
+        del*) isrepo;   echo "-- deleting";  delete  "$@"; exit;;
+        keep) isrepo;   echo "-- keeping";   keep    "$@"; exit;;
+        l*)   isrepo;                        lists   "$1"; exit;;
         *) exits "invalid operation: $cmd";;
     esac
 }
