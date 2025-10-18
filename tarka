@@ -345,13 +345,14 @@ backup() {
         untar "$src" "$hash"
     fi
     echo "-- sync source"
-    sync "$src/" "$xdir"
+    sync "$src/" "$xdir" -v
     targ "$src" "$hash"
     encrypt "$fetchdir/$(dst)".tar
     encrypt "$fetchdir/$(dst)".snr
     echo "-- sync repo"
     for i in "$(dst).tar.gpg" "$(dst).snr.gpg"; do
-        rsync -zv "$fetchdir/$i" "$repo/"
+        list "$fetchdir/$i"
+        rsync -z "$fetchdir/$i" "$repo/"
     done
     touch "$repo/.repo"
     rm -r "$xdir"
