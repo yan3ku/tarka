@@ -413,7 +413,7 @@ keep_in() {
     fi
     for file in $torem; do
         parse "$file"
-        NO_WARN=yes rem "$src" "$hash"
+        NO_WARN=yes remhash "$psrc" "$phash"
     done
 }
 
