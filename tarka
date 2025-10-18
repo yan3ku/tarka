@@ -392,7 +392,7 @@ keep_in() {
     fi
     for file in $torem; do
         parse "$file"
-        rem "$src" "$hash"
+        NO_WARN= rem "$src" "$hash"
     done
 }
 
