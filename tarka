@@ -36,8 +36,8 @@ cmd:
 
 vars:
     NO_WARN      - delete without asking
-    RESTORE_DEST - change restore destination
     PASSWORD     - encryption password
+    RESTORE_DEST - change restore destination
 EOF
     exit 1
 }
