@@ -463,9 +463,9 @@ main() {
         f*)   isfull=1; echo "-- full";      backup  "$@"; exit;;
         i*)   is_repo;  echo "-- increment"; backup  "$@"; exit;;
         r*)   is_repo;  echo "-- restoring"; restore "$@"; exit;;
+        c*)   is_repo;  echo "-- checking";  check   "$@"; exit;;
         del*) is_repo;  echo "-- deleting";  delete  "$@"; exit;;
         keep) is_repo;  echo "-- keeping";   keep    "$@"; exit;;
-        c*)   is_repo;  echo "-- checking";  check   "$@"; exit;;
         l*)   is_repo;                       lists   "$@"; exit;;
         *) exits "invalid operation: $cmd";;
     esac
