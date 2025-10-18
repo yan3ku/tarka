@@ -159,9 +159,13 @@ encrypt() {
 
 isthere() {
     for i in "$repo"/"$(realmangle "$1")"*"${2:+=$2+}"*.gpg; do
-        test -e "$i" || exits "backup for $1 $2${2:+ }doesn't exist"
-        break
+        test -e "$i"
+        return "$?"
     done
+}
+
+thereis() {
+    isthere "$1" "$2" || exits "backup for $1 $2${2:+ }doesn't exist"
 }
 
 fetch() { # fetches from sshfs
@@ -227,10 +231,7 @@ genhash() { # each set of incremental backups is grouped by hash
     hash=
     while test -z "$hash"; do
         rand="$(rand)"
-        for i in "$repo/$(realmangle "$src")"*"$rand"*.gpg; do
-            test -e "$i" || hash="$rand"
-            break
-        done
+        isthere "$src" "$rand" || hash="$rand"
     done
     printf "%s" "$hash"
 }
@@ -291,7 +292,7 @@ restore() { # src hash
     nr="$3"
     xdir="$(merge_dir "$src" "$hash")/"
 
-    isthere "$src" "$hash"
+    thereis "$src" "$hash"
     info_header # debug info
     yesnp "$dst CONTENT WILL BE DELETED"
     passprompt
@@ -325,7 +326,7 @@ backup() {
     mkdir -p "$fetchdir"
     xdir=$(merge_dir "$src" "$hash") # target for sync and the tar source
 
-    test "$isfull" -eq 0 && isthere "$src" "$hash"
+    test "$isfull" -eq 0 && thereis "$src" "$hash"
     info_header # debug info
     passprompt
     if test "$isfull" -eq 0; then
@@ -352,7 +353,7 @@ delete() {
     hash="$2"
     xdir="$(merge_dir "$src" "$hash")/"
 
-    isthere "$src" "$hash"
+    thereis "$src" "$hash"
     info_header # debug info
     test -z "$3" && rem=remhash || rem=remhash_latest
     $rem "$src" "$hash"
@@ -431,7 +432,7 @@ keep() {
     test -n "$3" || usage
     test -n "$4" || usage
 
-    isthere "$1"
+    thereis "$1"
     keep_in "$1" "$2" "$3" "$4"
 }
 
