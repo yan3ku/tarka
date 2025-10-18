@@ -26,6 +26,10 @@ cmd:
     list
     delete
     keep repo src yearly montly weekly
+
+vars:
+    NO_WARN      - delete without asking
+    RESTORE_DEST - change restore destination
 EOF
     exit 1
 }
