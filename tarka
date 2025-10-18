@@ -69,27 +69,36 @@ exits() {
     exit 1
 }
 
+contyesnop() {
+    test -n "$NO_WARN" && return
+    printf "%s"  "${1:-}${1:+ }continue? (yes/n): "
+    read -r choice
+    test "$choice" != "yes" && exit 0
+}
+
 passprompt() {
     stty -echo
     printf "Backup password: "
-    read pass
+    read -r pass
     stty echo
     echo
 }
 
+# shellcheck disable=SC2317
 cleanup() {
     echo "-- cleaning up"
     rm -f "$repo/.lock"
     rm -f "$repo/*.tar"
 }
 
+# shellcheck disable=SC2317
 disconn() {
     arg=$?
     cleanup
     fusermount -u "$repo"
     rmdir "$repo"
     rm -r "$fetchdir"
-    exit $arg
+    exit "$arg"
 }
 
 mangle() {  # mangle directory to use as backup filename
@@ -122,12 +131,6 @@ parse() { # parse backup file name and their metadata eg:
     pdate="${pdate%.*}"
     pday="${pdate%__*}"
     ptime="${pdate#*__}"
-
-    # echo "psrc $psrc"
-    # echo "date $pdate"
-    # echo "hash $phash"
-    # echo "pnr  $pnr"
-    # echo "ptag $ptag"
 }
 
 parsedate() { # extension for parse not needed in general case
@@ -166,7 +169,7 @@ fetch() { # fetches from sshfs
         parse "$i"
         test "$pnr" -gt "${3:-2137}" && break
         list "$i"
-        sync "$i" "$fetchdir/${i#$repo}" || exits "failed fetching $i"
+        sync "$i" "$fetchdir/${i#"$repo"}" || exits "failed fetching $i"
     done
 }
 
@@ -186,20 +189,18 @@ untar() {
         parse "$i"
         test "$pnr" -gt "${3:-2137}" && break
         list "$i"
-        tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive "$i""
+        tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive $i"
         rm "$i"
     done
     test -e "$(merge_dir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
 
+# shellcheck disable=SC2317
 remhash_latest() {
     echo "-- LATEST TO REMOVE:"
     latest="$(latest "$1" "$2")"
     list "$latest"
-    if test -z "$NO_WARN"; then
-        read -p "continue? (yes/n): " choice
-        test "$choice" != "yes" && exit 0
-    fi
+    contyesnop
     rm -f "$latest"
 }
 
@@ -209,10 +210,7 @@ remhash() {
         test -e "$i" || exits "backup for $1 $2 doesn't exist"
         list "$i"
     done
-    if test -z "$NO_WARN"; then
-        read -p "continue? (yes/n): " choice
-        test "$choice" != "yes" && exit 0
-    fi
+    contyesnop
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         rm -f "$i"
     done
@@ -240,10 +238,12 @@ listfmt() {
 
 list() {
     parse "$1"
+    # shellcheck disable=SC2059
     printf "$(listfmt)" "$psrc" "$pday" "$ptime" "$phash" "$pnr" "$ptag"
 }
 
 lists() {
+    # shellcheck disable=SC2059
     printf "$(listfmt)"  "src" "day" "time" "hash" "nr" "tag"
     for i in "$repo/${1+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
         test -e "$i" || break
@@ -256,7 +256,7 @@ sync() {
 }
 
 targ() { # tar with -g
-    snar="$repo/~${1#$fetchdir/}.snar"
+    snar="$repo/~${1#"$fetchdir"/}.snar"
     test "$isfull" -eq 0 && ! test -e "$snar" && exits "snar at $snar doesn't exist"
     echo "-- tar with $snar..."
     tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
@@ -283,17 +283,14 @@ restore() { # src hash
     test -n "$2" || usage
 
     src="$(realpath "$1")"
-    dst="$(realpath ${RESTORE_DEST:-$src})"
+    dst="$(realpath "${RESTORE_DEST:-$src}")"
     hash="$2"
     nr="$3"
     xdir="$(merge_dir "$src" "$hash")/"
 
     isthere "$src" "$hash"
     info_header # debug info
-    if test -z "$NO_WARN" && test -e "$dst"; then
-        read -p "$dst CONTENT WILL BE DELETED; continue? (yes/n): " choice
-        test "$choice" != "yes" && exit 0
-    fi
+    contyesnop "$dst CONTENT WILL BE DELETED"
     passprompt
     fetch "$src" "$hash" "$nr"
     ungpg "$src" "$hash" "$nr"
@@ -306,7 +303,7 @@ restore() { # src hash
 backup() {
     test -n "$1" || usage
 
-    src="$(realpath $1)"
+    src="$(realpath "$1")"
     tag=${2:-}
     # %S is needed for correct ordering just in case of multiple backups in the same minut
     date=$(daytime)
@@ -418,10 +415,7 @@ keep_in() {
     for i in $torem; do
         list "$i"
     done
-    if test -z "$NO_WARN"; then
-        read -p "continue? (yes/n): " choice
-        test "$choice" != "yes" && exit 0
-    fi
+    contyesnop
     for file in $torem; do
         parse "$file"
         NO_WARN=yes remhash "$psrc" "$phash"
@@ -452,7 +446,7 @@ main() {
             trap disconn EXIT
             ;;
         *)
-            repo="$(realpath ${2%/})"
+            repo="$(realpath "${2%/}")"
             fetchdir="${repo}"
             trap cleanup EXIT
             ;;
