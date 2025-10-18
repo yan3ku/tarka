@@ -27,11 +27,11 @@ usage() {
 $0 cmd repo [src] [hash] [nr]
 cmd:
     full
-    increment
-    restore
     list
-    delete
     check
+    delete
+    restore
+    increment
     keep repo src yearly montly weekly
 
 vars:
