@@ -370,7 +370,7 @@ keep_in() {
     cutoffw="$(date -d "$4 weeks  ago"  +"$(dayfmt)")"
     set --;
     for i in "$repo"/"$(realmangle "$src")"*.gpg; do
-        set -- "$(basename "$i")" "$@"
+        set -- "$i" "$@"
     done;
     lasty=
     lastm=
@@ -379,10 +379,9 @@ keep_in() {
     tokeep="$(mktemp)"
     hashall="$(mktemp)"
     for i; do
-        # list "$i"
         parse "$i"
-        echo "$phash">>"$hashall"
         parsedate
+        echo "$phash">>"$hashall"
         if cmpdate "$pday" "$cutoffy" && test "$lefty" -gt 0 && test "$lasty" != "$pyear"; then
             lefty=$((lefty-1))
             keep=1
@@ -402,13 +401,13 @@ keep_in() {
         lastw="$pweek"
     done
     # find the backup groups to delete (this needs testing)
-    sort "$hashall" | uniq >"$hashall.rev"
-    sort "$tokeep"  | uniq >"$tokeep.rev"
-    torem=$(comm -23 "$hashall.rev" "$tokeep.rev")
+    sort "$hashall" | uniq >"$hashall.s"
+    sort "$tokeep"  | uniq >"$tokeep.s"
+    torem=$(comm -23 "$hashall.s" "$tokeep.s")
     while IFS= read -r hash; do
         lists "$src" "$hash" -1
-    done<"$tokeep.rev"
-    rm "$tokeep" "$hashall" "$tokeep.rev" "$hashall.rev"
+    done<"$tokeep.s"
+    rm "$tokeep" "$hashall" "$tokeep.s" "$hashall.s"
     test -z "$torem" && echo "-- nothing to remove; exiting" && exit 0
     echo "-- TO REMOVE"
     while IFS= read -r hash; do
