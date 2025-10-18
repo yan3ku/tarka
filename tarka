@@ -207,7 +207,7 @@ remhash_latest() {
     latest="$(latest "$1" "$2")"
     list "$latest"
     yesnp
-    rm -f "$latest"
+    rm "$latest"
 }
 
 remhash() {
@@ -218,7 +218,7 @@ remhash() {
     done
     yesnp
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
-        rm -f "$i"
+        rm "$i"
     done
 }
 
@@ -272,7 +272,7 @@ targ() { # tar with -g
     fi
     echo "-- tar with $dst.snr..."
     tar -cpf "$dst.tar" "$xdir" -g  "$snar" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
-    rm -f "$repo/${snar#"$fetchdir"}.gpg"
+    rm "$repo/${snar#"$fetchdir"}.gpg"
     mv "$snar" "$dst.snr"
 }
 
@@ -344,18 +344,17 @@ backup() {
         ungpg "$src" "$hash"
         untar "$src" "$hash"
     fi
-    echo "-- sync source and fetch dir"
+    echo "-- sync source"
     sync "$src/" "$xdir"
     targ "$src" "$hash"
     encrypt "$fetchdir/$(dst)".tar
     encrypt "$fetchdir/$(dst)".snr
-    echo "-- sync"
-    rsync -zv "$fetchdir/$(dst).tar.gpg" "$repo/$(dst).tar.gpg"
-    rsync -zv "$fetchdir/$(dst).snr.gpg" "$repo/$(dst).snr.gpg"
+    echo "-- sync repo"
+    for i in "$(dst).tar.gpg" "$(dst).snr.gpg"; do
+        rsync -zv "$fetchdir/$i" "$repo/"
+    done
     touch "$repo/.repo"
     rm -r "$xdir"
-    rm "$fetchdir/$(dst).snr"
-    rm "$fetchdir/$(dst).tar"
 }
 
 delete() {
