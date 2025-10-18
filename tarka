@@ -401,13 +401,13 @@ keep_in() {
         lastw="$pweek"
     done
     # find the backup groups to delete (this needs testing)
-    sort "$hashall" | uniq >"$hashall.s"
-    sort "$tokeep"  | uniq >"$tokeep.s"
-    torem=$(comm -23 "$hashall.s" "$tokeep.s")
+    torem=$(grep -vxFf "$tokeep" "$hashall")
     while IFS= read -r hash; do
         lists "$src" "$hash" -1
-    done<"$tokeep.s"
-    rm "$tokeep" "$hashall" "$tokeep.s" "$hashall.s"
+    done<<EOF
+$(sort "$tokeep" | uniq)
+EOF
+    rm "$tokeep" "$hashall"
     test -z "$torem" && echo "-- nothing to remove; exiting" && exit 0
     echo "-- TO REMOVE"
     while IFS= read -r hash; do
