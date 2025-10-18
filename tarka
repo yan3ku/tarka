@@ -389,7 +389,7 @@ keep_in() {
     for file in $tokeep; do
         list "$file"
     done
-    # find the backup groups to delete
+    # find the backup groups to delete (this needs testing)
     norem=1
     lasthash=
     torem=
