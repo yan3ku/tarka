@@ -142,8 +142,8 @@ encrypt() {
 }
 
 isthere() {
-    for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
-        test -e "$i" || exits "backup for $1 $2 doesn't exist"
+    for i in "$repo"/"$(realmangle "$1")"*"${2:+=$2+}"*.gpg; do
+        test -e "$i" || exits "backup for $1 $2${2:+ }doesn't exist"
         break
     done
 }
@@ -369,7 +369,6 @@ keep_in() {
         # list "$i"
         parse "$i"
         parsedate
-        test "$pnr" -ne 0 && continue
         if cmpdate "$pday" "$cutoffy" && test "$lefty" -gt 0 && test "$lasty" != "$pyear"; then
             lefty=$((lefty-1))
             keep=1
@@ -412,6 +411,7 @@ keep() {
     test -n "$4" || usage
 
     src="$(realpath "$1")"
+    isthere "$src"
     keep_in "$src" "$2" "$3" "$4"
 }
 
