@@ -111,7 +111,7 @@ parse() { # parse backup file name and their metadata eg:
 
     pdate="${pdate%.*}"
     pday="${pdate%__*}"
-    phour="${pdate#*__}"
+    ptime="${pdate#*__}"
 
     # echo "psrc $psrc"
     # echo "date $pdate"
@@ -230,11 +230,11 @@ listfmt() {
 
 list() {
     parse "$1"
-    printf "$(listfmt)" "$psrc" "$pday" "$phour" "$phash" "$pnr" "$ptag"
+    printf "$(listfmt)" "$psrc" "$pday" "$ptime" "$phash" "$pnr" "$ptag"
 }
 
 lists() {
-    printf "$(listfmt)"  "src" "day" "hour" "hash" "nr" "tag"
+    printf "$(listfmt)"  "src" "day" "time" "hash" "nr" "tag"
     for i in "$repo/${1+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
         test -e "$i" || break
         list "$i"
