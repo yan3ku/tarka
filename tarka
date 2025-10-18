@@ -31,11 +31,13 @@ cmd:
     restore
     list
     delete
+    check
     keep repo src yearly montly weekly
 
 vars:
     NO_WARN      - delete without asking
     RESTORE_DEST - change restore destination
+    PASSWORD     - encryption password
 EOF
     exit 1
 }
@@ -69,7 +71,7 @@ exits() {
     exit 1
 }
 
-contyesnop() {
+yesnp() {
     test -n "$NO_WARN" && return
     printf "%s"  "${1:-}${1:+ }continue? (yes/n): "
     read -r choice
@@ -77,9 +79,10 @@ contyesnop() {
 }
 
 passprompt() {
+    test -n "$PASSWORD" && return
     stty -echo
     printf "Backup password: "
-    read -r pass
+    read -r PASSWORD
     stty echo
     echo
 }
@@ -151,7 +154,7 @@ latest() { # latest backup for directory
 }
 
 encrypt() {
-    gpg -q --batch --passphrase "$pass" --symmetric --cipher-algo AES256 "$@" || exits "gpg encrypt error"
+    gpg -q --batch --passphrase "$PASSWORD" --symmetric --cipher-algo AES256 "$@" || exits "gpg encrypt error"
 }
 
 isthere() {
@@ -179,7 +182,7 @@ ungpg() {
         parse "$i"
         test "$pnr" -gt "${3:-2137}" && break
         list "$i"
-        gpg -q --batch --passphrase "$pass" --output "${i%.gpg}" --decrypt "$i" || exits "gpg decrypt error"
+        gpg -q --batch --passphrase "$PASSWORD" --output "${i%.gpg}" --decrypt "$i" || exits "gpg decrypt error"
     done
 }
 
@@ -200,7 +203,7 @@ remhash_latest() {
     echo "-- LATEST TO REMOVE:"
     latest="$(latest "$1" "$2")"
     list "$latest"
-    contyesnop
+    yesnp
     rm -f "$latest"
 }
 
@@ -210,7 +213,7 @@ remhash() {
         test -e "$i" || exits "backup for $1 $2 doesn't exist"
         list "$i"
     done
-    contyesnop
+    yesnp
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         rm -f "$i"
     done
@@ -290,7 +293,7 @@ restore() { # src hash
 
     isthere "$src" "$hash"
     info_header # debug info
-    contyesnop "$dst CONTENT WILL BE DELETED"
+    yesnp "$dst CONTENT WILL BE DELETED"
     passprompt
     fetch "$src" "$hash" "$nr"
     ungpg "$src" "$hash" "$nr"
@@ -415,7 +418,7 @@ keep_in() {
     for i in $torem; do
         list "$i"
     done
-    contyesnop
+    yesnp
     for file in $torem; do
         parse "$file"
         NO_WARN=yes remhash "$psrc" "$phash"
@@ -458,8 +461,9 @@ main() {
         f*)   isfull=1; echo "-- full";      backup  "$@"; exit;;
         i*)   is_repo;  echo "-- increment"; backup  "$@"; exit;;
         r*)   is_repo;  echo "-- restoring"; restore "$@"; exit;;
-        del)  is_repo;  echo "-- deleting";  delete  "$@"; exit;;
+        del*) is_repo;  echo "-- deleting";  delete  "$@"; exit;;
         keep) is_repo;  echo "-- keeping";   keep    "$@"; exit;;
+        c*)   is_repo;  echo "-- checking";  check   "$@"; exit;;
         l*)   is_repo;                       lists   "$@"; exit;;
         *) exits "invalid operation: $cmd";;
     esac
