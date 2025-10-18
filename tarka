@@ -73,7 +73,7 @@ exits() {
 
 yesnp() {
     test -n "$NO_WARN" && return
-    printf "%s"  "${1:-}${1:+ }continue? (yes/n): "
+    printf "%s"  "${1:-}${1:+; }continue? (yes/n): "
     read -r choice
     test "$choice" != "yes" && exit 0
 }
@@ -338,7 +338,7 @@ backup() {
     targ "$xdir" "$fetchdir/$(dst)"
     encrypt "$fetchdir/$(dst)".tar
     echo "-- sync $repo/$repo.tar.gpg"
-    rsync -v "$fetchdir/$(dst).tar.gpg" "$repo/$(dst).tar.gpg"
+    rsync -zv "$fetchdir/$(dst).tar.gpg" "$repo/$(dst).tar.gpg"
     touch "$repo/.repo"
     rm -r "$xdir"
     rm "$fetchdir/$(dst).tar"
