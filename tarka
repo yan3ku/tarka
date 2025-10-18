@@ -8,11 +8,11 @@
 # Requires GNU date and tar
 #
 # TODO: list command should list backup size
-# TODO: make keep_in list all backups not just the nr 0
+# TODO: test keep_in (keep command)
 # TODO: test on directories with spaces?
 # TODO: encrypt snar
 # TODO: remove snar
-# TODO: checksums (man cksum)
+# TODO: checksums (with cksum or gpg sign functionality)
 #
 #set -x
 
@@ -129,7 +129,7 @@ parsedate() { # extension for parse not needed in general case
 
 latest() { # latest backup for directory
     latest=""
-    for i in "$repo"/"$(realmangle "$1")"*; do
+    for i in "$repo"/"$(realmangle "$1")"*.gpg; do
         if test "${i##*.}" != snar; then
             latest="$i"
         fi
@@ -235,7 +235,7 @@ list() {
 
 lists() {
     printf "$(listfmt)"  "src" "day" "hour" "hash" "nr" "tag"
-    for i in "$repo/${1+$(realmangle "$1")}"*.gpg; do
+    for i in "$repo/${1+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
         test -e "$i" || break
         list "$i"
     done
@@ -356,7 +356,6 @@ keep_in() {
     cutoffm="$(date -d "$3 months ago"  +"$(dayfmt)")"
     cutoffw="$(date -d "$4 weeks  ago"  +"$(dayfmt)")"
     tokeep=
-    torem=
     set --;
     for i in "$repo"/"$(realmangle "$src")"*.gpg; do
         set -- "$(basename "$i")" "$@"
@@ -381,7 +380,7 @@ keep_in() {
             leftw=$((leftw-1))
             keep=1
         fi
-        test "$keep" -eq 1 && tokeep="$i $tokeep" || torem="$i $torem"
+        test "$keep" -eq 1 && tokeep="$i $tokeep"
         keep=0
         lasty="$pyear"
         lastm="$pmonth"
@@ -390,9 +389,23 @@ keep_in() {
     for file in $tokeep; do
         list "$file"
     done
+    # find the backup groups to delete
+    norem=1
+    lasthash=
+    torem=
+    for i in "$repo"/"$(realmangle "$src")"*.gpg; do
+        parse "$i"
+        if test "$lasthash" != "$phash"; then
+            test "$norem" -eq 0 && torem="$i $torem"
+            norem=0
+        fi
+        echo "$tokeep" | grep -q "=$phash+" && norem=1
+        lasthash="$phash"
+    done
+    test -z "$torem" && echo "-- nothing to remove; exiting" && exit 0
     echo "-- TO REMOVE"
-    for file in $torem; do
-        list "$file"
+    for i in $torem; do
+        list "$i"
     done
     if test -z "$NO_WARN"; then
         read -p "continue? (yes/n): " choice
@@ -400,7 +413,7 @@ keep_in() {
     fi
     for file in $torem; do
         parse "$file"
-        NO_WARN= rem "$src" "$hash"
+        NO_WARN=yes rem "$src" "$hash"
     done
 }
 
@@ -410,9 +423,8 @@ keep() {
     test -n "$3" || usage
     test -n "$4" || usage
 
-    src="$(realpath "$1")"
-    isthere "$src"
-    keep_in "$src" "$2" "$3" "$4"
+    isthere "$1"
+    keep_in "$1" "$2" "$3" "$4"
 }
 
 main() {
