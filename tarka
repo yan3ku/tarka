@@ -338,7 +338,8 @@ backup() {
     sync "$src/" "$xdir"
     targ "$xdir" "$fetchdir/$(dst)"
     encrypt "$fetchdir/$(dst)".tar
-    echo "-- sync $repo/$repo.tar.gpg"
+    echo "-- sync"
+    list "$repo/$(dst).tar.gpg"
     rsync -zv "$fetchdir/$(dst).tar.gpg" "$repo/$(dst).tar.gpg"
     touch "$repo/.repo"
     rm -r "$xdir"
