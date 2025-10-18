@@ -154,7 +154,7 @@ fetch() { # fetches from sshfs
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         test -e "$i" || exits "backup for $1 $2 doesn't exist"
         parse "$i"
-        test "$pnr" -gt "${3-2137}" && break
+        test "$pnr" -gt "${3:-2137}" && break
         list "$i"
         sync "$i" "$fetchdir/${i#$repo}" || exits "failed fetching $i"
     done
@@ -164,7 +164,7 @@ ungpg() {
     echo "-- ungpg"
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         parse "$i"
-        test "$pnr" -gt "${3-2137}" && break
+        test "$pnr" -gt "${3:-2137}" && break
         list "$i"
         gpg -q --batch --passphrase "$pass" --output "${i%.gpg}" --decrypt "$i" || exits "gpg decrypt error"
     done
@@ -174,7 +174,7 @@ untar() {
     echo "-- untar"
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.tar; do
         parse "$i"
-        test "$pnr" -gt "${3-2137}" && break
+        test "$pnr" -gt "${3:-2137}" && break
         list "$i"
         tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive "$i""
         rm "$i"
