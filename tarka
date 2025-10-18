@@ -418,7 +418,7 @@ $torem
 EOF
     yesnp
     while IFS= read -r hash; do
-        NO_WARN=yes remhash "$psrc" "$hash"
+        NO_WARN=yes remhash "$psrc" "$hash" >/dev/null
     done<<EOF
 $torem
 EOF
