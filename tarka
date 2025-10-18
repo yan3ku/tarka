@@ -15,8 +15,6 @@
 # list command should list backup size
 # test keep_in (keep command)
 # test on directories with spaces?
-# encrypt snar
-# remove snar
 # checksums (with cksum or gpg sign functionality)
 #
 # Code:
@@ -91,7 +89,8 @@ passprompt() {
 cleanup() {
     echo "-- cleaning up"
     rm -f "$repo/.lock"
-    rm -f "$repo/*.tar"
+    rm -f "$repo"/*.snr
+    rm -f "$repo"/*.tar
 }
 
 # shellcheck disable=SC2317
@@ -129,7 +128,9 @@ parse() { # parse backup file name and their metadata eg:
     ptag="${pmeta#*+}"
     ptag="${ptag#*--}"
     ptag="${ptag%%.*}"
-    test "$pmeta" = "${pmeta#*--*}" && ptag=""
+    case "$pmeta" in
+        *.snr*) ptag="#SNAR#";;
+    esac
 
     pdate="${pdate%.*}"
     pday="${pdate%__*}"
@@ -146,9 +147,7 @@ parsedate() { # extension for parse not needed in general case
 latest() { # latest backup for directory
     latest=""
     for i in "$repo"/"$(realmangle "$1")"*.gpg; do
-        if test "${i##*.}" != snar; then
-            latest="$i"
-        fi
+        latest="$i"
     done
     printf "%s" "$latest"
 }
@@ -237,21 +236,23 @@ genhash() { # each set of incremental backups is grouped by hash
 }
 
 listfmt() {
-    printf "%s" "%-40s\t%12s %-5s\t%8s %02s\t%s\n"
+    printf "%s" "%-40s\t%12s %-5s\t%8s\t%8s %02s\t%s\n"
 }
 
 list() {
     parse "$1"
+    test -n "$2" && test "$ptag" = "#SNAR#" && return
+    psize="$(du -k "$1" | cut -f1)"
     # shellcheck disable=SC2059
-    printf "$(listfmt)" "$psrc" "$pday" "$ptime" "$phash" "$pnr" "$ptag"
+    printf "$(listfmt)" "$psrc" "$pday" "$ptime" "$psize" "$phash" "$pnr" "$ptag"
 }
 
 lists() {
     # shellcheck disable=SC2059
-    test -z "$3" && printf "$(listfmt)" "src" "day" "time" "hash" "nr" "tag"
+    test -z "$3" && printf "$(listfmt)" "src" "day" "time" "size" "hash" "nr" "tag"
     for i in "$repo/${1+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
         test -e "$i" || break
-        list "$i"
+        list "$i" -1
     done
 }
 
@@ -260,10 +261,19 @@ sync() {
 }
 
 targ() { # tar with -g
-    snar="$repo/~${1#"$fetchdir"/}.snar"
-    test "$isfull" -eq 0 && ! test -e "$snar" && exits "snar at $snar doesn't exist"
-    echo "-- tar with $snar..."
-    tar -cpf "${2}.tar" "${1}" -g  "$snar" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
+    dst="$fetchdir/$(dst "$1" "$2")"
+    xdir="$(merge_dir "$1" "$2")"
+    snar="$dst.snar"
+    if test "$isfull" -eq 0; then
+        snar="$fetchdir/${latest#"$repo"}"
+        snar="${snar%.*}"
+        snar="${snar%.*}.snr"
+        ! test -e "$snar" && exits "snar at $snar doesn't exist"
+    fi
+    echo "-- tar with $dst.snr..."
+    tar -cpf "$dst.tar" "$xdir" -g  "$snar" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
+    rm -f "$repo/${snar#"$fetchdir"}.gpg"
+    mv "$snar" "$dst.snr"
 }
 
 is_repo() {
@@ -324,7 +334,7 @@ backup() {
     fi
 
     mkdir -p "$fetchdir"
-    xdir=$(merge_dir "$src" "$hash") # target for sync and the tar source
+    xdir="$(merge_dir "$src" "$hash")" # target for sync and the tar source
 
     test "$isfull" -eq 0 && thereis "$src" "$hash"
     info_header # debug info
@@ -334,15 +344,17 @@ backup() {
         ungpg "$src" "$hash"
         untar "$src" "$hash"
     fi
-    echo "-- sync fetch dir"
+    echo "-- sync source and fetch dir"
     sync "$src/" "$xdir"
-    targ "$xdir" "$fetchdir/$(dst)"
+    targ "$src" "$hash"
     encrypt "$fetchdir/$(dst)".tar
+    encrypt "$fetchdir/$(dst)".snr
     echo "-- sync"
-    list "$repo/$(dst).tar.gpg"
     rsync -zv "$fetchdir/$(dst).tar.gpg" "$repo/$(dst).tar.gpg"
+    rsync -zv "$fetchdir/$(dst).snr.gpg" "$repo/$(dst).snr.gpg"
     touch "$repo/.repo"
     rm -r "$xdir"
+    rm "$fetchdir/$(dst).snr"
     rm "$fetchdir/$(dst).tar"
 }
 
