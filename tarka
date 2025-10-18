@@ -273,14 +273,15 @@ restore() { # src hash
     test -n "$2" || usage
 
     src="$(realpath "$1")"
+    dst="$(realpath ${RESTORE_DEST:-$src})"
     hash="$2"
     nr="$3"
     xdir="$(merge_dir "$src" "$hash")/"
 
     isthere "$src" "$hash"
     info_header # debug info
-    if test -z "$NO_WARN" && test -e "$src"; then
-        read -p "$src CONTENT WILL BE DELETED; continue? (yes/n): " choice
+    if test -z "$NO_WARN" && test -e "$dst"; then
+        read -p "$dst CONTENT WILL BE DELETED; continue? (yes/n): " choice
         test "$choice" != "yes" && exit 0
     fi
     passprompt
@@ -288,7 +289,7 @@ restore() { # src hash
     ungpg "$src" "$hash" "$nr"
     untar "$src" "$hash" "$nr"
     echo "-- restore $src"
-    sync "$xdir" "$src" -v
+    sync "$xdir" "$dst" -v
     rm -r "$xdir"
 }
 
