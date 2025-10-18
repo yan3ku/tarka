@@ -12,6 +12,7 @@
 # TODO: test on directories with spaces?
 # TODO: encrypt snar
 # TODO: remove snar
+# TODO: checksums (man cksum)
 #
 #set -x
 
@@ -41,6 +42,23 @@ daytime() {
     date +"$(dayfmt)__$(timefmt).%S"
 }
 
+merge_dir() { # path hash | directory for merging tars aka extract dir
+    printf "%s" "${fetchdir}/$(realmangle "$1")~$2"
+}
+
+dst() { # destination name for new backup
+    printf "%s" "$(realmangle "$src")~${date}=${hash}+${nr}${tag:+--}${tag}"
+}
+
+cmpdate() {
+    expr "$1" \> "$2" >/dev/null
+}
+
+exits() {
+    printf "%s; exiting\n" "--! $1" >&2
+    exit 1
+}
+
 passprompt() {
     stty -echo
     printf "Backup password: "
@@ -53,6 +71,25 @@ cleanup() {
     echo "-- cleaning up"
     rm -f "$repo/.lock"
     rm -f "$repo/*.tar"
+}
+
+disconn() {
+    arg=$?
+    cleanup
+    fusermount -u "$repo"
+    rmdir "$repo"
+    rm -r "$fetchdir"
+    exit $arg
+}
+
+mangle() {  # mangle directory to use as backup filename
+    mangle="${1%/}"
+    mangle="$(echo "${mangle#/}" | tr '/' '~')"
+    printf "%s" "$mangle"
+}
+
+realmangle() {
+    mangle "$(realpath "$1")"
 }
 
 parse() { # parse backup file name and their metadata eg:
@@ -90,16 +127,6 @@ parsedate() { # extension for parse not needed in general case
     pweek="$(date -d "$pday" +%U)"
 }
 
-mangle() {  # mangle directory to use as backup filename
-    mangle="${1%/}"
-    mangle="$(echo "${mangle#/}" | tr '/' '~')"
-    printf "%s" "$mangle"
-}
-
-realmangle() {
-    mangle "$(realpath "$1")"
-}
-
 latest() { # latest backup for directory
     latest=""
     for i in "$repo"/"$(realmangle "$1")"*; do
@@ -108,20 +135,6 @@ latest() { # latest backup for directory
         fi
     done
     printf "%s" "$latest"
-}
-
-
-merge_dir() { # path hash | directory for merging tars aka extract dir
-    printf "%s" "${fetchdir}/$(realmangle "$1")~$2"
-}
-
-dst() { # destination name for new backup
-    printf "%s" "$(realmangle "$src")~${date}=${hash}+${nr}${tag:+--}${tag}"
-}
-
-exits() {
-    printf "%s; exiting\n" "--! $1" >&2
-    exit 1
 }
 
 encrypt() {
@@ -169,7 +182,7 @@ untar() {
     test -e "$(merge_dir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
 
-rem_latest() {
+remhash_latest() {
     echo "-- LATEST TO REMOVE:"
     latest="$(latest "$1" "$2")"
     list "$latest"
@@ -180,7 +193,7 @@ rem_latest() {
     rm -f "$latest"
 }
 
-rem() {
+remhash() {
     echo "-- TO REMOVE:"
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         test -e "$i" || exits "backup for $1 $2 doesn't exist"
@@ -326,17 +339,12 @@ delete() {
 
     src="$(realpath "$1")"
     hash="$2"
-    nr="$3"
     xdir="$(merge_dir "$src" "$hash")/"
 
     isthere "$src" "$hash"
     info_header # debug info
-    test -z "$3" && rem=rem || rem=rem_latest
-    $rem "$src" "$hash" "$nr"
-}
-
-cmpdate() {
-    expr "$1" \> "$2" >/dev/null
+    test -z "$3" && rem=remhash || rem=remhash_latest
+    $rem "$src" "$hash"
 }
 
 keep_in() {
@@ -405,15 +413,6 @@ keep() {
 
     src="$(realpath "$1")"
     keep_in "$src" "$2" "$3" "$4"
-}
-
-disconn() {
-    arg=$?
-    cleanup
-    fusermount -u "$repo"
-    rmdir "$repo"
-    rm -r "$fetchdir"
-    exit $arg
 }
 
 main() {
