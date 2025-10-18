@@ -1,10 +1,11 @@
 #!/bin/sh
 #
-# incremental backups using tar and rsync
-# works transparently over SSH by mounting with sshfs
-# unencrypted files are never exposed on the remote system
-# root privileges are required to preserve permissions (see tar man page for -p)
-# its posix shell right now because im weird
+# Incremental backups using tar and rsync
+# Works transparently over SSH by mounting with sshfs
+# Unencrypted files are never exposed on the remote system
+# Root privileges are required to preserve permissions (see tar man page for -p)
+# Portable POSIX shell script, so it can run on FreeBSD and other systems
+# Requires GNU date and tar
 #
 # TODO: list command should list backup size
 # TODO: make keep_in list all backups not just the nr 0
