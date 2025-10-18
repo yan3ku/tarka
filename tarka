@@ -248,7 +248,7 @@ list() {
 
 lists() {
     # shellcheck disable=SC2059
-    printf "$(listfmt)"  "src" "day" "time" "hash" "nr" "tag"
+    test -z "$3" && printf "$(listfmt)" "src" "day" "time" "hash" "nr" "tag"
     for i in "$repo/${1+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
         test -e "$i" || break
         list "$i"
@@ -368,7 +368,6 @@ keep_in() {
     cutoffy="$(date -d "$2 years  ago"  +"$(dayfmt)")"
     cutoffm="$(date -d "$3 months ago"  +"$(dayfmt)")"
     cutoffw="$(date -d "$4 weeks  ago"  +"$(dayfmt)")"
-    tokeep=
     set --;
     for i in "$repo"/"$(realmangle "$src")"*.gpg; do
         set -- "$(basename "$i")" "$@"
@@ -377,9 +376,12 @@ keep_in() {
     lastm=
     lastw=
     keep=0
+    tokeep="$(mktemp)"
+    hashall="$(mktemp)"
     for i; do
         # list "$i"
         parse "$i"
+        echo "$phash">>"$hashall"
         parsedate
         if cmpdate "$pday" "$cutoffy" && test "$lefty" -gt 0 && test "$lasty" != "$pyear"; then
             lefty=$((lefty-1))
@@ -393,38 +395,33 @@ keep_in() {
             leftw=$((leftw-1))
             keep=1
         fi
-        test "$keep" -eq 1 && tokeep="$i $tokeep"
+        test "$keep" -eq 1 && echo "$phash">>"$tokeep"
         keep=0
         lasty="$pyear"
         lastm="$pmonth"
         lastw="$pweek"
     done
-    for file in $tokeep; do
-        list "$file"
-    done
     # find the backup groups to delete (this needs testing)
-    norem=1
-    lasthash=
-    torem=
-    for i in "$repo"/"$(realmangle "$src")"*.gpg; do
-        parse "$i"
-        if test "$lasthash" != "$phash"; then
-            test "$norem" -eq 0 && torem="$i $torem"
-            norem=0
-        fi
-        echo "$tokeep" | grep -q "=$phash+" && norem=1
-        lasthash="$phash"
-    done
+    sort "$hashall" | uniq >"$hashall.rev"
+    sort "$tokeep"  | uniq >"$tokeep.rev"
+    torem=$(comm -23 "$hashall.rev" "$tokeep.rev")
+    while IFS= read -r hash; do
+        lists "$src" "$hash" -1
+    done<"$tokeep.rev"
+    rm "$tokeep" "$hashall" "$tokeep.rev" "$hashall.rev"
     test -z "$torem" && echo "-- nothing to remove; exiting" && exit 0
     echo "-- TO REMOVE"
-    for i in $torem; do
-        list "$i"
-    done
+    while IFS= read -r hash; do
+        lists "$src" "$hash" -1
+    done<<EOF
+$torem
+EOF
     yesnp
-    for file in $torem; do
-        parse "$file"
-        NO_WARN=yes remhash "$psrc" "$phash"
-    done
+    while IFS= read -r hash; do
+        NO_WARN=yes remhash "$psrc" "$hash"
+    done<<EOF
+$torem
+EOF
 }
 
 keep() {
