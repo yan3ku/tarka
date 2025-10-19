@@ -238,7 +238,7 @@ sum() {
 }
 
 remsum() {
-    (cd "$repo" && sed "/  ${1##*/}/d" .cksum | sponge .cksum) || exits "failed updating checksum file"
+    (cd "$repo" && sed "/^[0-9a-z]\{64\}  ${1##*/}$/d" .cksum | sponge .cksum) || exits "failed updating checksum file"
 }
 
 snarof() {
