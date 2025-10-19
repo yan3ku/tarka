@@ -10,7 +10,10 @@
 # Install ispell for nice backup identifiers
 #
 # Requirements:
-# GNU date and tar
+# GNU tar (-g)
+# moreutils
+# dateutils
+# ispell (/usr/share/dict/words for nice identifiers)
 #
 # TODO:
 # list command should list backup size
@@ -49,7 +52,7 @@ timefmt() {
 }
 
 daytime() {
-    date +"$(dayfmt)__$(timefmt).%S"
+    date +"$(dayfmt)__$(timefmt)%%%S"
 }
 
 merge_dir() { # path hash | directory for merging tars aka extract dir
@@ -79,7 +82,7 @@ yesnp() {
 passprompt() {
     test -n "$TARKA_PASSWORD" && return
     stty -echo
-    printf "Backup password: "
+    printf "repository password: "
     read -r TARKA_PASSWORD
     stty echo
     echo
@@ -114,7 +117,7 @@ realmangle() {
 }
 
 parse() { # parse backup file name and their metadata eg:
-    # home~yaneko~devel~tarka~test-in~2025-10-16__16-22.39=fb63256f+0.tar.gpg
+    # home~yaneko~devel~tarka~test-in~2025-10-16__16-22%39=fb63256f+0.tar.gpg
     set -- "$(basename "$1")"
     psrc="$(echo "~${1%~*}~" | tr '~' '/')"
     pmeta="${1##*~}"
@@ -133,7 +136,7 @@ parse() { # parse backup file name and their metadata eg:
         *.snr*) ptag="#SNAR#";;
     esac
 
-    pdate="${pdate%.*}"
+    pdate="${pdate%\%*}"
     pday="${pdate%__*}"
     ptime="${pdate#*__}"
 }
@@ -154,7 +157,8 @@ latest() { # latest backup for directory
 }
 
 encrypt() {
-    gpg -q --batch --passphrase "$TARKA_PASSWORD" --symmetric --cipher-algo AES256 "$@" || exits "gpg encrypt error"
+    gpg -q --batch --passphrase "$TARKA_PASSWORD" --symmetric --cipher-algo AES256 "$@" ||\
+        exits "gpg encrypt error"
 }
 
 isthere() {
@@ -186,7 +190,8 @@ ungpg() {
         parse "$i"
         test "$pnr" -gt "${3:-2137}" && break
         list "$i"
-        gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" || exits "gpg decrypt error"
+        gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" ||\
+            exits "gpg decrypt error"
     done
 }
 
@@ -214,7 +219,7 @@ sum() {
 }
 
 remsum() {
-    (cd "$repo" && sed "/  ${1##*/}/d" check.sum >check-new.sum && mv check-new.sum check.sum) || \
+    (cd "$repo" && sed "/  ${1##*/}/d" check.sum | sponge check.sum) ||\
         exits "failed updating checksum file"
 }
 
@@ -305,7 +310,7 @@ targ() { # tar with -g
 
 isrepo() {
     if ! test -e "$repo/.repo"; then
-        echo "-- not backup repository; exiting" >&2
+        echo "-- not repository; exiting" >&2
         usage
     fi
 }
@@ -404,9 +409,9 @@ keep_in() {
     lefty="$2"
     leftm="$3"
     leftw="$4"
-    cutoffy="$(date -d "$2 years  ago"  +"$(dayfmt)")"
-    cutoffm="$(date -d "$3 months ago"  +"$(dayfmt)")"
-    cutoffw="$(date -d "$4 weeks  ago"  +"$(dayfmt)")"
+    cutoffy="$(dateadd today "-${2}y" -f "$(dayfmt)")"
+    cutoffm="$(dateadd today "-${3}m" -f "$(dayfmt)")"
+    cutoffw="$(dateadd today "-${4}w" -f "$(dayfmt)")"
     set --;
     for i in "$repo"/"$(realmangle "$src")"*.gpg; do
         set -- "$i" "$@"
@@ -484,16 +489,20 @@ main() {
             repo=$(mktemp -d)
             printf "%s" "-- connecting... "
             (sshfs "$2" "$repo" && printf "ok\n") || exits "error; check auth"
+            if test -e "$repo/.lock"; then
+               fusermount -u "$repo"
+               exits "repository locked"
+            fi
             trap disconn EXIT
             ;;
         *)
+            test -e "$repo/.lock" && exits "repository locked"
             repo="$(realpath "${2%/}")"
             fetchdir="${repo}"
             trap cleanup EXIT
             ;;
     esac
     shift 2
-    test -e "$repo/.lock" && exits "backup repository is locked; either wait for job to finish or delete .lock"
     touch "$repo/.lock" || exits "couldn't create lock file"
     case "$cmd" in
         f*)   isfull=1; echo "-- full";      backup  "$@"; exit;;
