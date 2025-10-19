@@ -54,11 +54,11 @@ daytime() {
     date +"$(dayfmt)__$(timefmt)%%%S"
 }
 
-merge_dir() { # path hash | directory for merging tars aka extract dir
+mergedir() { # path hash | directory for merging tars aka extract dir
     printf "%s" "${fetchdir}/$(realmangle "$1")~$2"
 }
 
-dst() { # destination name for new backup
+backname() { # destination name for new backup
     printf "%s" "$(realmangle "$src")~${date}=${hash}+${nr}${tag:+--}${tag}"
 }
 
@@ -156,7 +156,8 @@ latest() { # latest backup for directory
 }
 
 encrypt() {
-    gpg -q --batch --passphrase "$TARKA_PASSWORD" --symmetric --cipher-algo AES256 "$@" ||\
+    list "$1"
+    gpg -q --batch --passphrase "$TARKA_PASSWORD" --symmetric --cipher-algo AES256 "$1" ||\
         exits "gpg encrypt error"
 }
 
@@ -168,14 +169,14 @@ isthere() {
 }
 
 thereis() {
-    isthere "$1" "$2" || exits "backup for $1 $2${2:+ }doesn't exist"
+    isthere "$1" "$2" || exits "backup for $1 $2${2:+ }missing"
 }
 
 fetch() { # fetches from sshfs
     [ "$repo" = "$fetchdir" ] && return
     echo "-- fetch"
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
-        test -e "$i" || exits "backup for $1 $2 doesn't exist"
+        test -e "$i" || exits "backup for $1 $2 missing"
         parse "$i"
         test "$pnr" -gt "${3:-2137}" && break
         list "$i"
@@ -203,7 +204,7 @@ untar() {
         tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive $i"
         rm "$i"
     done
-    test -e "$(merge_dir "$1" "$2")" || exits "assertion failed; merge directory is absent"
+    test -e "$(mergedir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
 
 check() {
@@ -223,21 +224,30 @@ remsum() {
     (cd "$repo" && sed "/  ${1##*/}/d" check.sum | sponge check.sum) || exits "failed updating checksum file"
 }
 
-# shellcheck disable=SC2317
-remhash_latest() {
-    echo "-- LATEST TO REMOVE:"
-    latest="$(latest "$1" "$2")"
-    list "$latest"
-    yesnp
-    # TODO remove snar
-    rm "$latest"
-    remsum "$latest"
+snarof() {
+    snar="${1%.*}"
+    snar="${snar%.*}"
+    snar="${snar#"$repo/"}.snr"
+    printf "%s" "$snar"
 }
 
-remhash() {
+# shellcheck disable=SC2317
+rem_latest() {
+    echo "-- LATEST TO REMOVE:"
+    latest="$(latest "$1" "$2")"
+    snar="$repo/$(snarof "$latest").gpg"
+    list "$latest"
+    yesnp
+    for i in "$latest" "$snar"; do
+        rm "$i"
+        remsum "$i"
+    done
+}
+
+rem() {
     echo "-- TO REMOVE:"
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
-        test -e "$i" || exits "backup for $1 $2 doesn't exist"
+        test -e "$i" || exits "backup for $1 $2 missing"
         list "$i" #-1
     done
     yesnp
@@ -293,18 +303,21 @@ sync() {
 }
 
 targ() { # tar with -g
-    dst="$fetchdir/$(dst "$1" "$2")"
-    xdir="$(merge_dir "$1" "$2")"
-    if test "$isfull" -eq 0; then
-        snar="$fetchdir/${latest#"$repo"}"
-        snar="${snar%.*}"
-        snar="${snar%.*}.snr"
-        ! test -e "$snar" && exits "snar at $snar doesn't exist"
-        cp "$snar" "$dst.snr"
-    fi
     echo "-- tar"
-    list "$dst.snr"
-    tar -cpf "$dst.tar" "$xdir" -g "$dst.snr" -P --lzma --xform="s|^${fetchdir}/||" || exits "archiving $1 failed"
+    bname="$(backname)"
+    xdir="$(mergedir "$1" "$2")"
+    if test "$isfull" -eq 0; then
+        snar="$fetchdir/$(snarof "$latest")"
+        list "$snar"
+        ! test -e "$snar" && exits "$snar missing; archiving failed"
+        cp "$snar" "$bname.snr"
+    else
+        list "$bname.snr"
+    fi
+    list "$bname.tar"
+    echo "$bname.tar"
+    tar -C "$fetchdir" -cpvf "$fetchdir/$bname.tar" "${xdir#"$fetchdir/"}" -g "$fetchdir/$bname.snr" -P --lzma | ts || exits "archiving $fetchdir/$bname.tar failed"
+    ! test -e "$fetchdir/dst.tar" || exits "error archiving $fetchdir/$bname.tar"
     rm -r "$xdir"
 }
 
@@ -316,10 +329,11 @@ isrepo() {
 }
 
 info() {
-    printf "%-10s : %s\n" "repo" "$repo"
+    printf "%-10s : %s\n" "repo"  "$repo"
     printf "%-10s : %s\n" "fetch" "$fetchdir"
-    printf "%-10s : %s\n" "merge" "$xdir"
-    printf "%-10s : %s\n" "dest" "$(dst)"
+    test -n "$hash"   && printf "%-10s : %s %s\n" "hash" "$hash" "$nr"
+    test -n "$dst"    && printf "%-10s : %s\n" "dest"   "$dst"
+    test -n "$bname"  && printf "%-10s : %s\n" "name"   "$bname"
     test -n "$latest" && printf "%-10s : %s\n" "latest" "$latest"
     echo "----------"
 }
@@ -332,7 +346,7 @@ restore() { # src hash
     dst="$(realpath "${TARKA_RESTORE_DEST:-$src}")"
     hash="$2"
     nr="$3"
-    xdir="$(merge_dir "$src" "$hash")/"
+    xdir="$(mergedir "$src" "$hash")/"
 
     thereis "$src" "$hash"
     info # debug info
@@ -342,12 +356,13 @@ restore() { # src hash
     ungpg "$src" "$hash" "$nr"
     untar "$src" "$hash" "$nr"
     echo "-- restore $src"
-    sync "$xdir" "$dst" -v
+    sync "$xdir" "$dst" -v | ts
     rm -r "$xdir"
 }
 
 backup() {
     test -n "$1" || usage
+    test -e "$1" || exits "source $1 missing"
 
     src="$(realpath "$1")"
     tag=${2:-}
@@ -366,7 +381,8 @@ backup() {
     fi
 
     mkdir -p "$fetchdir"
-    xdir="$(merge_dir "$src" "$hash")" # target for sync and the tar source
+    bname="$(backname)"
+    xdir="$(mergedir "$src" "$hash")" # target for sync and the tar source
 
     test "$isfull" -eq 0 && thereis "$src" "$hash"
     info # debug info
@@ -377,16 +393,17 @@ backup() {
         untar "$src" "$hash"
     fi
     echo "-- sync source"
-    sync "$src/" "$xdir" -v
+    sync "$src/" "$xdir" -v | ts
     targ "$src" "$hash"
-    encrypt "$fetchdir/$(dst)".tar
-    encrypt "$fetchdir/$(dst)".snr
+    echo "-- encrypt"
+    encrypt "$fetchdir/$bname".tar
+    encrypt "$fetchdir/$bname".snr
     echo "-- sync repo"
-    for i in "$(dst).tar.gpg" "$(dst).snr.gpg"; do
+    for i in "$bname.tar.gpg" "$bname.snr.gpg"; do
         list "$fetchdir/$i"
         rsync -z "$fetchdir/$i" "$repo/"
     done
-    sum "$(dst)".tar.gpg "$(dst)".snr.gpg
+    sum "$bname".tar.gpg "$bname".snr.gpg
     touch "$repo/.repo"
 }
 
@@ -396,11 +413,10 @@ delete() {
 
     src="$(realpath "$1")"
     hash="$2"
-    xdir="$(merge_dir "$src" "$hash")/"
 
     thereis "$src" "$hash"
     info # debug info
-    test -z "$3" && rem=remhash || rem=remhash_latest
+    test -z "$3" && rem=rem || rem=rem_latest
     $rem "$src" "$hash"
 }
 
@@ -461,7 +477,7 @@ $torem
 EOF
     yesnp
     while IFS= read -r hash; do
-        TARKA_NO_WARN=yes remhash "$psrc" "$hash" >/dev/null
+        TARKA_NO_WARN=yes rem "$psrc" "$hash" >/dev/null
     done<<EOF
 $torem
 EOF
