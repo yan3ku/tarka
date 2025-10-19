@@ -16,7 +16,6 @@
 # ispell (/usr/share/dict/words for nice identifiers)
 #
 # TODO:
-# list command should list backup size
 # test keep_in (keep command)
 # test on directories with spaces?
 #

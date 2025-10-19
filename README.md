@@ -129,22 +129,8 @@ Backups are encrypted **locally** before being synced to the remote.
 ```
 
 ---
-
-## 🧪 TODO
-
-* [ ] Show sizes in `list`
-* [ ] Handle directories with spaces
-* [ ] Improve `keep` robustness
-* [ ] Add progress indicators
-
----
-
 ## 📝 Philosophy
 
 > "Maximize the lines of code **not written**."
 
 This script minimizes assumptions, maximizes transparency, and works with composable UNIX tools.
-
----
-
-Let me know if you want a Markdown version with formatting or a man-page-style version.
