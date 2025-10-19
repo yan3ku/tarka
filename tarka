@@ -42,12 +42,20 @@ EOF
     exit 1
 }
 
+timerbeg() {
+    timebeg=$(date +%s)
+}
+
+timerend() {
+    printf "%ss\n" "$(($(date +%s)-timebeg))"
+}
+
 dayfmt() {
-    printf "%s" "%Y-%m-%d"
+    printf %s "%Y-%m-%d"
 }
 
 timefmt() {
-    printf "%s" "%H-%M"
+    printf %s "%H-%M"
 }
 
 daytime() {
@@ -55,11 +63,11 @@ daytime() {
 }
 
 mergedir() { # path hash | directory for merging tars aka extract dir
-    printf "%s" "${fetchdir}/$(realmangle "$1")~$2"
+    printf %s "${fetchdir}/$(realmangle "$1")~$2"
 }
 
 backname() { # destination name for new backup
-    printf "%s" "$(realmangle "$src")~${date}=${hash}+${nr}${tag:+--}${tag}"
+    printf %s "$(realmangle "$src")~${date}=${hash}+${nr}${tag:+--}${tag}"
 }
 
 cmpdate() {
@@ -73,7 +81,7 @@ exits() {
 
 yesnp() {
     test -n "$TARKA_NO_WARN" && return
-    printf "%s"  "${1:-}${1:+; }continue? (yes/n): "
+    printf %s  "${1:-}${1:+; }continue? (yes/n): "
     read -r choice
     test "$choice" != "yes" && exits
 }
@@ -108,7 +116,7 @@ disconn() {
 mangle() {  # mangle directory to use as backup filename
     mangle="${1%/}"
     mangle="$(echo "${mangle#/}" | tr '/' '~')"
-    printf "%s" "$mangle"
+    printf %s "$mangle"
 }
 
 realmangle() {
@@ -152,13 +160,15 @@ latest() { # latest backup for directory
     for i in "$repo"/"$(realmangle "$1")"*.gpg; do
         latest="$i"
     done
-    printf "%s" "$latest"
+    printf %s "$latest"
 }
 
 encrypt() {
-    list "$1"
+    timerbeg
+    list0 "$1"
     gpg -q --batch --passphrase "$TARKA_PASSWORD" --symmetric --cipher-algo AES256 "$1" ||\
         exits "gpg encrypt error"
+    timerend
 }
 
 isthere() {
@@ -180,8 +190,10 @@ fetch() { # fetches from sshfs
         parse "$i"
         test "$ptag" = "#SNAR#" -a "$pnr" -ne "$(($3-1))" && continue
         test "$pnr" -gt "$3" && break
-        list "$i"
+        timerbeg
+        list0 "$i"
         sync "$i" "$fetchdir/${i#"$repo"}" || exits "failed fetching $i"
+        timerend
     done
 }
 
@@ -190,9 +202,11 @@ ungpg() {
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         parse "$i"
         test "$pnr" -gt "$3" && break
-        list "$i"
+        timerbeg
+        list0 "$i"
         gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" ||\
             exits "gpg decrypt error"
+        timerend
     done
 }
 
@@ -201,9 +215,11 @@ untar() {
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.tar; do
         parse "$i"
         test "$pnr" -gt "$3" && break
-        list "$i"
+        timerbeg
+        list0 "$i"
         tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive $i"
         rm "$i"
+        timerend
     done
     test -e "$(mergedir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
@@ -229,7 +245,7 @@ snarof() {
     snar="${1%.*}"
     snar="${snar%.*}"
     snar="${snar#"$repo/"}.snr"
-    printf "%s" "$snar"
+    printf %s "$snar"
 }
 
 # shellcheck disable=SC2317
@@ -272,11 +288,11 @@ genhash() { # each set of incremental backups is grouped by hash
         rand="$(rand)"
         isthere "$src" "$rand" || hash="$rand"
     done
-    printf "%s" "$hash"
+    printf %s "$hash"
 }
 
 listfmt() {
-    printf "%s" "%-40s\t%12s %-5s\t%8s\t%8s %02s\t%-12s"
+    printf %s "%-40s\t%12s %-5s\t%8s\t%8s %02s\t%-12s"
 }
 
 list() {
@@ -407,8 +423,10 @@ backup() {
     encrypt "$fetchdir/$bname".snr
     echo "-- sync repo"
     for i in "$bname.tar.gpg" "$bname.snr.gpg"; do
-        list "$fetchdir/$i"
+        timerbeg
+        list0 "$fetchdir/$i"
         rsync -z "$fetchdir/$i" "$repo/"
+        timerend
     done
     sum "$bname".tar.gpg "$bname".snr.gpg
     touch "$repo/.repo"
@@ -510,7 +528,7 @@ main() {
         *:*)
             fetchdir=$(mktemp -d)
             repo=$(mktemp -d)
-            printf "%s" "-- connecting... "
+            printf %s "-- connecting... "
             (sshfs "$2" "$repo" && printf "ok\n") || exits "error; check auth"
             if test -e "$repo/.lock"; then
                fusermount -u "$repo"
