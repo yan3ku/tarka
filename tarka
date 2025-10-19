@@ -178,7 +178,8 @@ fetch() { # fetches from sshfs
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         test -e "$i" || exits "backup for $1 $2 missing"
         parse "$i"
-        test "$pnr" -gt "${3:-2137}" && break
+        test "$ptag" = "#SNAR#" -a "$pnr" -ne "$(($3-1))" && continue
+        test "$pnr" -gt "$3" && break
         list "$i"
         sync "$i" "$fetchdir/${i#"$repo"}" || exits "failed fetching $i"
     done
@@ -188,7 +189,7 @@ ungpg() {
     echo "-- ungpg"
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         parse "$i"
-        test "$pnr" -gt "${3:-2137}" && break
+        test "$pnr" -gt "$3" && break
         list "$i"
         gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" ||\
             exits "gpg decrypt error"
@@ -199,7 +200,7 @@ untar() {
     echo "-- untar"
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.tar; do
         parse "$i"
-        test "$pnr" -gt "${3:-2137}" && break
+        test "$pnr" -gt "$3" && break
         list "$i"
         tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive $i"
         rm "$i"
@@ -208,20 +209,20 @@ untar() {
 }
 
 check() {
-    ! test -s "$repo/check.sum" && echo "---- nothing to check" && return
+    ! test -s "$repo/.cksum" && echo "---- nothing to check" && return
     (cd "$repo" && while IFS=$(printf '\n') read -r i; do
          list0 "${i%: *}"; printf "%s\n" "${i##*: }";
      done<<EOF)
-$(sha256sum -c "$repo/check.sum" || exits "verifying checksum failed")
+$(sha256sum -c "$repo/.cksum" || exits "verifying checksum failed")
 EOF
 }
 
 sum() {
-    (cd "$repo" && sha256sum "$@">> "$repo/check.sum") || exits "generating checksum failed"
+    (cd "$repo" && sha256sum "$@">> "$repo/.cksum") || exits "generating checksum failed"
 }
 
 remsum() {
-    (cd "$repo" && sed "/  ${1##*/}/d" check.sum | sponge check.sum) || exits "failed updating checksum file"
+    (cd "$repo" && sed "/  ${1##*/}/d" .cksum | sponge .cksum) || exits "failed updating checksum file"
 }
 
 snarof() {
@@ -248,7 +249,7 @@ rem() {
     echo "-- TO REMOVE:"
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         test -e "$i" || exits "backup for $1 $2 missing"
-        list "$i" #-1
+        list "$i" -1
     done
     yesnp
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
@@ -310,7 +311,7 @@ targ() { # tar with -g
         snar="$fetchdir/$(snarof "$latest")"
         list "$snar"
         ! test -e "$snar" && exits "$snar missing; archiving failed"
-        cp "$snar" "$bname.snr"
+        cp "$snar" "$fetchdir/$bname.snr"
     else
         list "$bname.snr"
     fi
@@ -348,7 +349,13 @@ restore() { # src hash
     nr="$3"
     xdir="$(mergedir "$src" "$hash")/"
 
+    if test -z "$nr"; then
+        parse "$(latest "$src" "$hash")"
+        nr="$pnr"
+    fi
+
     thereis "$src" "$hash"
+    test "$nr" -ge 0 || exits "nr must be positive"
     info # debug info
     yesnp "$dst CONTENT WILL BE DELETED"
     passprompt
@@ -388,9 +395,9 @@ backup() {
     info # debug info
     passprompt
     if test "$isfull" -eq 0; then
-        fetch "$src" "$hash"
-        ungpg "$src" "$hash"
-        untar "$src" "$hash"
+        fetch "$src" "$hash" "$nr"
+        ungpg "$src" "$hash" "$nr"
+        untar "$src" "$hash" "$nr"
     fi
     echo "-- sync source"
     sync "$src/" "$xdir" -v | ts
