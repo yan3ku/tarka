@@ -216,12 +216,11 @@ EOF
 }
 
 sum() {
-    (cd "$repo" && sha256sum "$@">> "$repo/"check.sum) || exits "generating checksum failed"
+    (cd "$repo" && sha256sum "$@">> "$repo/check.sum") || exits "generating checksum failed"
 }
 
 remsum() {
-    (cd "$repo" && sed "/  ${1##*/}/d" check.sum | sponge check.sum) ||\
-        exits "failed updating checksum file"
+    (cd "$repo" && sed "/  ${1##*/}/d" check.sum | sponge check.sum) || exits "failed updating checksum file"
 }
 
 # shellcheck disable=SC2317
