@@ -454,7 +454,7 @@ keep_in() {
     cutoffm="$(dateadd today "-${3}m" -f "$(dayfmt)")"
     cutoffw="$(dateadd today "-${4}w" -f "$(dayfmt)")"
     set --;
-    for i in "$repo"/"$(realmangle "$src")"*.gpg; do
+    for i in "$repo"/"$(realmangle "$src")"*.tar.gpg; do
         set -- "$i" "$@"
     done;
     lasty=
@@ -486,14 +486,14 @@ keep_in() {
         lastw="$pweek"
     done
     # find the backup groups to delete (this needs testing)
-    torem=$(grep -vxFf "$tokeep" "$hashall")
+    torem=$(grep -vxFf "$tokeep" "$hashall" | sort | uniq)
     while IFS= read -r hash; do
         lists "$src" "$hash" -1
     done<<EOF
 $(sort "$tokeep" | uniq)
 EOF
     rm "$tokeep" "$hashall"
-    test -z "$torem" && echo "-- nothing to remove; exiting" && exit 0
+    test -z "$torem" && echo "---- nothing to remove; exiting" && exit 0
     echo "-- TO REMOVE"
     while IFS= read -r hash; do
         lists "$src" "$hash" -1
