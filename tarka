@@ -208,7 +208,9 @@ untar() {
 
 check() {
     ! test -s "$repo/check.sum" && echo "---- nothing to check" && return
-    (cd "$repo" && while IFS= read -r i; do list0 "${i%: *}"; printf "%s\n" "${i##*: }"; done<<EOF)
+    (cd "$repo" && while IFS=$(printf '\n') read -r i; do
+         list0 "${i%: *}"; printf "%s\n" "${i##*: }";
+     done<<EOF)
 $(sha256sum -c "$repo/check.sum" || exits "verifying checksum failed")
 EOF
 }
