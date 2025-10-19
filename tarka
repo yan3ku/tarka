@@ -33,9 +33,9 @@ cmd:
     keep repo src yearly montly weekly
 
 vars:
-    NO_WARN      - delete without asking
-    PASSWORD     - encryption password
-    RESTORE_DEST - change restore destination
+    TARKA_NO_WARN      - delete without asking
+    TARKA_PASSWORD     - encryption password
+    TARKA_RESTORE_DEST - change restore destination
 EOF
     exit 1
 }
@@ -70,17 +70,17 @@ exits() {
 }
 
 yesnp() {
-    test -n "$NO_WARN" && return
+    test -n "$TARKA_NO_WARN" && return
     printf "%s"  "${1:-}${1:+; }continue? (yes/n): "
     read -r choice
     test "$choice" != "yes" && exits
 }
 
 passprompt() {
-    test -n "$PASSWORD" && return
+    test -n "$TARKA_PASSWORD" && return
     stty -echo
     printf "Backup password: "
-    read -r PASSWORD
+    read -r TARKA_PASSWORD
     stty echo
     echo
 }
@@ -154,7 +154,7 @@ latest() { # latest backup for directory
 }
 
 encrypt() {
-    gpg -q --batch --passphrase "$PASSWORD" --symmetric --cipher-algo AES256 "$@" || exits "gpg encrypt error"
+    gpg -q --batch --passphrase "$TARKA_PASSWORD" --symmetric --cipher-algo AES256 "$@" || exits "gpg encrypt error"
 }
 
 isthere() {
@@ -186,7 +186,7 @@ ungpg() {
         parse "$i"
         test "$pnr" -gt "${3:-2137}" && break
         list "$i"
-        gpg -q --batch --passphrase "$PASSWORD" --output "${i%.gpg}" --decrypt "$i" || exits "gpg decrypt error"
+        gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" || exits "gpg decrypt error"
     done
 }
 
@@ -203,9 +203,9 @@ untar() {
 }
 
 check() {
-    ! test -s "$repo/check.sum" && return
-    (cd "$repo" && while IFS= read -r i; do list0 "${i%: *}"; printf "%s\n" "${i##*: }"; done<<EOF) || exits "verifying checksum failed"
-$(sha256sum -c "$repo/check.sum")
+    ! test -s "$repo/check.sum" && echo "---- nothing to check" && return
+    (cd "$repo" && while IFS= read -r i; do list0 "${i%: *}"; printf "%s\n" "${i##*: }"; done<<EOF)
+$(sha256sum -c "$repo/check.sum" || exits "verifying checksum failed")
 EOF
 }
 
@@ -244,7 +244,7 @@ remhash() {
 
 rand() {
     if test -r /usr/share/dict/words; then # requires ispell
-        grep "^[^']\{4,8\}$" /usr/share/dict/words | shuf -n1
+        grep "^[^']\{4,8\}$" /usr/share/dict/words | tr '[:upper:]' '[:lower:]' | shuf -n1
     else
         tr -dc a-z0-9 </dev/urandom | head -c 8
     fi
@@ -324,7 +324,7 @@ restore() { # src hash
     test -n "$2" || usage
 
     src="$(realpath "$1")"
-    dst="$(realpath "${RESTORE_DEST:-$src}")"
+    dst="$(realpath "${TARKA_RESTORE_DEST:-$src}")"
     hash="$2"
     nr="$3"
     xdir="$(merge_dir "$src" "$hash")/"
@@ -456,7 +456,7 @@ $torem
 EOF
     yesnp
     while IFS= read -r hash; do
-        NO_WARN=yes remhash "$psrc" "$hash" >/dev/null
+        TARKA_NO_WARN=yes remhash "$psrc" "$hash" >/dev/null
     done<<EOF
 $torem
 EOF
@@ -482,7 +482,8 @@ main() {
         *:*)
             fetchdir=$(mktemp -d)
             repo=$(mktemp -d)
-            sshfs "$2" "$repo" || exits "error connecting with server; check auth"
+            printf "%s" "-- connecting... "
+            (sshfs "$2" "$repo" && printf "ok\n") || exits "error; check auth"
             trap disconn EXIT
             ;;
         *)
