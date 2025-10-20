@@ -24,7 +24,7 @@
 
 usage() {
     cat >&2 <<EOF
-$0 cmd repo [src] [hash] [nr]
+$0 cmd repo [src] [id] [nr]
 cmd:
     full
     list
@@ -55,19 +55,19 @@ dayfmt() {
 }
 
 timefmt() {
-    printf %s "%H-%M"
+    printf %s "%H:%M"
 }
 
 daytime() {
     date +"$(dayfmt)__$(timefmt)%%%S"
 }
 
-mergedir() { # path hash | directory for merging tars aka extract dir
+mergedir() { # path id | directory for merging tars aka extract dir
     printf %s "${fetchdir}/$(realmangle "$1")~$2"
 }
 
 backname() { # destination name for new backup
-    printf %s "$(realmangle "$src")~${date}=${hash}+${nr}${tag:+--}${tag}"
+    printf %s "$(realmangle "$src")~${date}=${id}+${nr}${tag:+--}${tag}"
 }
 
 cmpdate() {
@@ -83,7 +83,7 @@ yesnp() {
     test -n "$TARKA_NO_WARN" && return
     printf %s  "${1:-}${1:+; }continue? (yes/n): "
     read -r choice
-    test "$choice" != "yes" && exits
+    test "$choice" = "yes"
 }
 
 passprompt() {
@@ -130,8 +130,8 @@ parse() { # parse backup file name and their metadata eg:
     pmeta="${1##*~}"
 
     pdate="${pmeta%=*}"
-    phash="${pmeta##*=}"
-    phash="${phash%+*}"
+    pid="${pmeta##*=}"
+    pid="${pid%+*}"
     pnr="${pmeta#*+}"
     pnr="${pnr%--*}"
     pnr="${pnr%%.*}"
@@ -234,7 +234,7 @@ EOF
 }
 
 sum() {
-    (cd "$repo" && sha256sum "$@">> "$repo/.cksum") || exits "generating checksum failed"
+    (cd "$repo" && sha256sum "$@">>"$repo/.cksum") || exits "generating checksum failed"
 }
 
 remsum() {
@@ -254,7 +254,7 @@ rem_latest() {
     latest="$(latest "$1" "$2")"
     snar="$repo/$(snarof "$latest").gpg"
     list "$latest"
-    yesnp
+    yesnp || exits
     for i in "$latest" "$snar"; do
         rm "$i"
         remsum "$i"
@@ -267,7 +267,7 @@ rem() {
         test -e "$i" || exits "backup for $1 $2 missing"
         list "$i" -1
     done
-    yesnp
+    yesnp || exits
     for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
         rm "$i"
         remsum "$i"
@@ -282,13 +282,13 @@ rand() {
     fi
 }
 
-genhash() { # each set of incremental backups is grouped by hash
-    hash=
-    while test -z "$hash"; do
+genid() { # each set of incremental backups is grouped by id
+    id=
+    while test -z "$id"; do
         rand="$(rand)"
-        isthere "$src" "$rand" || hash="$rand"
+        isthere "$src" "$rand" || id="$rand"
     done
-    printf %s "$hash"
+    printf %s "$id"
 }
 
 listfmt() {
@@ -300,7 +300,7 @@ list() {
     test -n "$2" && test "$2" -eq -1 && test "$ptag" = "#SNAR#" && return
     test -e "$1" && psize="$(du -k "$1" | cut -f1)" || psize="--"
     # shellcheck disable=SC2059
-    printf "$(listfmt)" "$psrc" "$pday" "$ptime" "$psize" "$phash" "$pnr" "$ptag"
+    printf "$(listfmt)" "$psrc" "$pday" "$ptime" "$psize" "$pid" "$pnr" "$ptag"
     test "${2--1}" -ne 0 && printf "\n"
 }
 
@@ -308,7 +308,7 @@ list0() { list "$1" 0; }
 
 lists() {
     # shellcheck disable=SC2059
-    test -z "$3" && printf "$(listfmt)\n" "src" "day" "time" "size" "hash" "nr" "tag"
+    test -z "$3" && printf "$(listfmt)\n" "src" "day" "time" "size" "id" "nr" "tag"
     for i in "$repo/${1+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
         test -e "$i" || break
         list "$i" -1
@@ -348,36 +348,32 @@ isrepo() {
 info() {
     printf "%-10s : %s\n" "repo"  "$repo"
     printf "%-10s : %s\n" "fetch" "$fetchdir"
-    test -n "$hash"   && printf "%-10s : %s %s\n" "hash" "$hash" "$nr"
+    test -n "$id"   && printf "%-10s : %s %s\n" "id" "$id" "$nr"
     test -n "$dst"    && printf "%-10s : %s\n" "dest"   "$dst"
     test -n "$bname"  && printf "%-10s : %s\n" "name"   "$bname"
     test -n "$latest" && printf "%-10s : %s\n" "latest" "$latest"
     echo "----------"
 }
 
-restore() { # src hash
+restore() { # src id
     test -n "$1" || usage
     test -n "$2" || usage
+    isnum   "$3" || usage
 
     src="$(realpath "$1")"
     dst="$(realpath "${TARKA_RESTORE_DEST:-$src}")"
-    hash="$2"
+    id="$2"
     nr="$3"
-    xdir="$(mergedir "$src" "$hash")/"
+    xdir="$(mergedir "$src" "$id")/"
 
-    if test -z "$nr"; then
-        parse "$(latest "$src" "$hash")"
-        nr="$pnr"
-    fi
-
-    thereis "$src" "$hash"
+    thereis "$src" "$id"
     test "$nr" -ge 0 || exits "nr must be positive"
     info # debug info
-    yesnp "$dst CONTENT WILL BE DELETED"
+    yesnp "$dst CONTENT WILL BE DELETED" || exits
     passprompt
-    fetch "$src" "$hash" "$nr"
-    ungpg "$src" "$hash" "$nr"
-    untar "$src" "$hash" "$nr"
+    fetch "$src" "$id" "$nr"
+    ungpg "$src" "$id" "$nr"
+    untar "$src" "$id" "$nr"
     echo "-- restore $src"
     sync "$xdir" "$dst" -v | ts
     rm -r "$xdir"
@@ -389,39 +385,38 @@ backup() {
 
     src="$(realpath "$1")"
     tag=${2:-}
-    # %S is needed for correct ordering just in case of multiple backups in the same minut
     date=$(daytime)
     latest=$(latest "$src")
 
     if test "$isfull" -eq 1 || test ! -e "$latest"; then
         isfull=1
-        hash="$(genhash)"
+        id="$(genid)"
         nr="0"
     else
         parse "$latest"
-        hash="$phash"
+        id="$pid"
         nr="$((pnr+1))"
     fi
 
     mkdir -p "$fetchdir"
     bname="$(backname)"
-    xdir="$(mergedir "$src" "$hash")" # target for sync and the tar source
+    xdir="$(mergedir "$src" "$id")" # target for sync and the tar source
 
-    test "$isfull" -eq 0 && thereis "$src" "$hash"
+    test "$isfull" -eq 0 && thereis "$src" "$id"
     info # debug info
     passprompt
     if test "$isfull" -eq 0; then
-        fetch "$src" "$hash" "$nr"
-        ungpg "$src" "$hash" "$nr"
-        untar "$src" "$hash" "$nr"
+        fetch "$src" "$id" "$nr"
+        ungpg "$src" "$id" "$nr"
+        untar "$src" "$id" "$nr"
     fi
-    echo "-- sync source"
+    echo "-- rsync source"
     sync "$src/" "$xdir" -v | ts
-    targ "$src" "$hash"
-    echo "-- encrypt"
+    targ "$src" "$id"
+    echo "-- gpg"
     encrypt "$fetchdir/$bname".tar
     encrypt "$fetchdir/$bname".snr
-    echo "-- sync repo"
+    echo "-- rsync repo"
     for i in "$bname.tar.gpg" "$bname.snr.gpg"; do
         timerbeg
         list0 "$fetchdir/$i"
@@ -437,85 +432,89 @@ delete() {
     test -n "$2" || usage
 
     src="$(realpath "$1")"
-    hash="$2"
+    id="$2"
 
-    thereis "$src" "$hash"
+    thereis "$src" "$id"
     info # debug info
     test -z "$3" && rem=rem || rem=rem_latest
-    $rem "$src" "$hash"
+    $rem "$src" "$id"
 }
 
-keep_in() {
-    src="$1"
+isnum() {
+    case "$1" in
+        [0-9]*) return 0;;
+        *)      return 1;;
+    esac
+}
+
+keep() {
+    test -n "$1" || usage
+    isnum   "$2" || usage
+    isnum   "$3" || usage
+    isnum   "$4" || usage
+
+    src="$(realpath "$1")"
     lefty="$2"
     leftm="$3"
     leftw="$4"
     cutoffy="$(dateadd today "-${2}y" -f "$(dayfmt)")"
     cutoffm="$(dateadd today "-${3}m" -f "$(dayfmt)")"
     cutoffw="$(dateadd today "-${4}w" -f "$(dayfmt)")"
-    set --;
+
+    set --; # reverse to start from latest
     for i in "$repo"/"$(realmangle "$src")"*.tar.gpg; do
         set -- "$i" "$@"
     done;
+
     lasty=
     lastm=
     lastw=
     keep=0
     tokeep="$(mktemp)"
-    hashall="$(mktemp)"
+    idall="$(mktemp)"
     for i; do
         parse "$i"
         parsedate
-        echo "$phash">>"$hashall"
-        if cmpdate "$pday" "$cutoffy" && test "$lefty" -gt 0 && test "$lasty" != "$pyear"; then
+        echo "$pid">>"$idall"
+        if cmpdate "$pday" "$cutoffy" && test "$lefty" -gt 0 -a "$lasty" != "$pyear"; then
             lefty=$((lefty-1))
             keep=1
         fi
-        if cmpdate "$pday" "$cutoffm" && test "$leftm" -gt 0 && test "$lastm" != "$pmonth"; then
+        if cmpdate "$pday" "$cutoffm" && test "$leftm" -gt 0 -a "$lastm" != "$pmonth"; then
             leftm=$((leftm-1))
             keep=1
         fi
-        if cmpdate "$pday" "$cutoffw" && test "$leftw" -gt 0 && test "$lastw" != "$pweek"; then
+        if cmpdate "$pday" "$cutoffw" && test "$leftw" -gt 0 -a "$lastw" != "$pweek"; then
             leftw=$((leftw-1))
             keep=1
         fi
-        test "$keep" -eq 1 && echo "$phash">>"$tokeep"
+        test "$keep" -eq 1 && echo "$pid">>"$tokeep"
         keep=0
         lasty="$pyear"
         lastm="$pmonth"
         lastw="$pweek"
     done
     # find the backup groups to delete (this needs testing)
-    torem=$(grep -vxFf "$tokeep" "$hashall" | sort | uniq)
-    while IFS= read -r hash; do
-        lists "$src" "$hash" -1
+    torem=$(grep -vxFf "$tokeep" "$idall" | sort | uniq)
+    while IFS= read -r id; do
+        lists "$src" "$id" -1
     done<<EOF
 $(sort "$tokeep" | uniq)
 EOF
-    rm "$tokeep" "$hashall"
+    rm "$tokeep" "$idall"
     test -z "$torem" && echo "---- nothing to remove; exiting" && exit 0
     echo "-- TO REMOVE"
-    while IFS= read -r hash; do
-        lists "$src" "$hash" -1
+    while IFS= read -r id; do
+        lists "$src" "$id" -1
     done<<EOF
 $torem
 EOF
-    yesnp
-    while IFS= read -r hash; do
-        TARKA_NO_WARN=yes rem "$psrc" "$hash" >/dev/null
+    yesnp || exits
+    while IFS= read -r id; do
+        TARKA_NO_WARN=yes rem "$psrc" "$id" >/dev/null
     done<<EOF
 $torem
 EOF
-}
-
-keep() {
-    test -n "$1" || usage
-    test -n "$2" || usage
-    test -n "$3" || usage
-    test -n "$4" || usage
-
-    thereis "$1"
-    keep_in "$1" "$2" "$3" "$4"
 }
 
 main() {
