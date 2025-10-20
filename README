@@ -16,9 +16,10 @@ vars:
     TARKA_RESTORE_DEST - change restore destination
 
 commentary:
-The backups are stored as encrypted LZMA tar files. Incremental
-backups are done using the -g tar option. Rsync is used to compress the files
-on the fly when transferring them to/from the repository. If an SSH repository
-is used, the script handles the decryption in a separate fetch directory on
-the host. Don't forget to run `check` periodically to verify against
-corruption. Root is required to preserve permissions (check man for tar `-p`)
+The backups are stored as encrypted LZMA tar files. Incremental backups are done
+using the -g tar option. Rsync is used to compress the files on the fly when
+transferring them to/from the repository. If an SSH repository is used, the
+script handles the decryption in a separate fetch directory on the host so the
+unencrypted files are never exposed on remote. Don't forget to run `check`
+periodically to verify against corruption. Root is required to preserve
+permissions (check man for tar `-p`)
