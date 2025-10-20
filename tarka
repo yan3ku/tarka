@@ -238,7 +238,7 @@ sum() {
 }
 
 remsum() {
-    (cd "$repo" && sed "/^[0-9a-z]\{64\}  ${1##*/}$/d" .cksum | sponge .cksum) || exits "failed updating checksum file"
+    (cd "$repo" && sed "/^[0-9a-z]\{64\}  ${1##*/}$/d" .cksum | sponge .cksum)
 }
 
 snarof() {
@@ -333,7 +333,8 @@ targ() { # tar with -g
     fi
     list "$bname.tar"
     echo "$bname.tar"
-    tar -C "$fetchdir" -cpvf "$fetchdir/$bname.tar" "${xdir#"$fetchdir/"}" -g "$fetchdir/$bname.snr" -P --lzma | ts || exits "archiving $fetchdir/$bname.tar failed"
+    tar -C "$fetchdir" -cpvf "$fetchdir/$bname.tar" "${xdir#"$fetchdir/"}" \
+        -g "$fetchdir/$bname.snr" -P --lzma | ts || exits "archiving $fetchdir/$bname.tar failed"
     ! test -e "$fetchdir/dst.tar" || exits "error archiving $fetchdir/$bname.tar"
     rm -r "$xdir"
 }
