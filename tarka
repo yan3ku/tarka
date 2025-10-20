@@ -326,7 +326,7 @@ targ() { # tar with -g
     if test "$isfull" -eq 0; then
         snar="$fetchdir/$(snarof "$latest")"
         list "$snar"
-        ! test -e "$snar" && exits "$snar missing; archiving failed"
+        test -e "$snar" || exits "$snar missing; archiving failed"
         cp "$snar" "$fetchdir/$bname.snr"
     else
         list "$bname.snr"
@@ -335,7 +335,7 @@ targ() { # tar with -g
     echo "$bname.tar"
     tar -C "$fetchdir" -cpvf "$fetchdir/$bname.tar" "${xdir#"$fetchdir/"}" \
         -g "$fetchdir/$bname.snr" -P --lzma | ts || exits "archiving $fetchdir/$bname.tar failed"
-    ! test -e "$fetchdir/dst.tar" || exits "error archiving $fetchdir/$bname.tar"
+    test -e "$fetchdir/$bname.tar" || exits "error archiving $fetchdir/$bname.tar"
     rm -r "$xdir"
 }
 
