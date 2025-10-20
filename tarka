@@ -523,8 +523,8 @@ main() {
     test -n "$2" || usage
 
     isfull=0
-    cmd="$1"
-    case "$2" in
+    cmd="$2"
+    case "$1" in
         *:*)
             fetchdir=$(mktemp -d)
             repo=$(mktemp -d)
