@@ -1,4 +1,6 @@
-./tarka cmd repo [src] [id] [nr]
+Portable script for backups using rsync, gpg and tar
+
+./tarka repo cmd [src] [id] [nr]
 cmd:
     full
     list
@@ -14,10 +16,9 @@ vars:
     TARKA_RESTORE_DEST - change restore destination
 
 commentary:
-The backups are stored as encrypted LZMA tar files. Incremental backups are done
-using the -g tar option. Rsync is used to compress the files on the fly when
-transferring them to/from the repository. If an SSH repository is used, the
-script handles the decryption in a separate fetch directory on the host. Each
-full backup receives a unique identifier, which is inherited by subsequent
-incremental backups. Don't forget to run check periodically to verify against
-corruption.
+The backups are stored as encrypted LZMA tar files. Incremental
+backups are done using the -g tar option. Rsync is used to compress the files
+on the fly when transferring them to/from the repository. If an SSH repository
+is used, the script handles the decryption in a separate fetch directory on
+the host. Don't forget to run `check` periodically to verify against
+corruption. Root is required to preserve permissions (check man for tar `-p`)
