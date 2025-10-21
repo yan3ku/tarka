@@ -43,14 +43,6 @@ EOF
     exit 1
 }
 
-timerbeg() {
-    timebeg=$(date +%s)
-}
-
-timerend() {
-    printf "%ss\n" "$(($(date +%s)-timebeg))"
-}
-
 dayfmt() {
     printf %s "%Y-%m-%d"
 }
@@ -165,11 +157,9 @@ latest() { # latest backup for directory
 }
 
 encrypt() {
-    timerbeg
-    list0 "$1"
-    gpg -q --batch --passphrase "$TARKA_PASSWORD" --symmetric --cipher-algo AES256 "$1" ||\
+    list "$1"
+    gpg -q --batch --no-symkey-cache --passphrase "$TARKA_PASSWORD" -c --cipher-algo AES256 "$1" ||\
         exits "gpg encrypt error"
-    timerend
 }
 
 isthere() {
@@ -191,36 +181,32 @@ fetch() { # fetches from sshfs
         parse "$i"
         test "$ptag" = "#SNAR#" -a "$pnr" -ne "$(($3-1))" && continue
         test "$pnr" -gt "$3" && break
-        timerbeg
-        list0 "$i"
+        list "$i"
         sync "$i" "$fetchdir/${i#"$repo"}" || exits "failed fetching $i"
-        timerend
     done
 }
 
 ungpg() {
     echo "-- ungpg"
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.gpg; do
+        test -e "$i" || exits "archive for $1 $2 missing"
         parse "$i"
         test "$pnr" -gt "$3" && break
-        timerbeg
-        list0 "$i"
+        list "$i"
         gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" ||\
             exits "gpg decrypt error"
-        timerend
     done
 }
 
 untar() {
     echo "-- untar"
     for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.tar; do
+        test -e "$i" || exits "archive for $1 $2 missing"
         parse "$i"
         test "$pnr" -gt "$3" && break
-        timerbeg
-        list0 "$i"
+        list "$i"
         tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive $i"
         rm "$i"
-        timerend
     done
     test -e "$(mergedir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
@@ -420,10 +406,8 @@ backup() {
     encrypt "$fetchdir/$bname".snr
     echo "-- rsync repo"
     for i in "$bname.tar.gpg" "$bname.snr.gpg"; do
-        timerbeg
-        list0 "$fetchdir/$i"
+        list "$fetchdir/$i"
         rsync -z "$fetchdir/$i" "$repo/"
-        timerend
     done
     sum "$bname".tar.gpg "$bname".snr.gpg
     touch "$repo/.repo"
@@ -524,13 +508,12 @@ main() {
     test -n "$2" || usage
 
     isfull=0
-    cmd="$2"
     case "$1" in
         *:*)
             fetchdir=$(mktemp -d)
             repo=$(mktemp -d)
             printf %s "-- connecting... "
-            (sshfs "$2" "$repo" && printf "ok\n") || exits "error; check auth"
+            (sshfs "$1" "$repo" && printf "ok\n") || exits "error; check auth"
             if test -e "$repo/.lock"; then
                fusermount -u "$repo"
                exits "repository locked"
@@ -544,8 +527,9 @@ main() {
             trap cleanup EXIT
             ;;
     esac
-    shift 2
     touch "$repo/.lock" || exits "couldn't create lock file"
+    cmd="$2"
+    shift 2
     case "$cmd" in
         f*)   isfull=1; echo "-- full";      backup  "$@"; exit;;
         i*)   isrepo;   echo "-- increment"; backup  "$@"; exit;;
