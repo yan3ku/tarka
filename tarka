@@ -68,7 +68,7 @@ cmpdate() {
 }
 
 exits() {
-    printf "\n%s${1:+; }exiting\n" "--! $1" >&2
+    printf "%s${1:+; }exiting\n" "--! $1" >&2
     exit 1
 }
 
@@ -108,7 +108,7 @@ disconn() {
 
 mangle() {  # mangle directory to use as backup filename
     mangle="${1%/}"
-    mangle="$(echo "${mangle#/}" | tr '/' '~')"
+    mangle=$(echo "${mangle#/}" | tr '/' '~')
     printf %s "$mangle"
 }
 
@@ -119,7 +119,7 @@ realmangle() {
 parse() { # parse backup file name and their metadata eg:
     # home~yaneko~devel~tarka~test-in~2025-10-16__16-22%39=fb63256f+0.tar.gpg
     set -- "$(basename "$1")"
-    psrc="$(echo "~${1%~*}~" | tr '~' '/')"
+    psrc=$(echo "~${1%~*}~" | tr '~' '/')
     pmeta="${1##*~}"
 
     pdate="${pmeta%=*}"
@@ -273,6 +273,7 @@ genid() { # each set of incremental backups is grouped by id
     id=
     while test -z "$id"; do
         rand="$(rand)"
+        test "$rand" = "latest" && continue
         isthere "$src" "$rand" || id="$rand"
     done
     printf %s "$id"
@@ -346,24 +347,32 @@ info() {
 restore() { # src id
     test -n "$1" || usage
     test -n "$2" || usage
-    isnum   "$3" || usage
 
-    src="$(realpath "$1")"
-    dst="$(realpath "${TARKA_RESTORE_DEST:-$src}")"
+    src=$(realpath "$1")
+    dst=$(realpath "${TARKA_RESTORE_DEST:-$src}")
     id="$2"
     nr="$3"
-    xdir="$(mergedir "$src" "$id")/"
 
-    thereis "$src" "$id"
-    test "$nr" -ge 0 || exits "nr must be positive"
+    if test "$2" = "latest"; then
+        latest="$(latest "$src")"
+        parse "$latest"
+        id="$pid"
+        nr="$pnr"
+    else
+        isnum "$3" || usage
+    fi
+
+    xdir=$(mergedir "$src" "$id")
+
     info # debug info
+    thereis "$src" "$id"
     yesnp "$dst CONTENT WILL BE DELETED" || exits
     passprompt
     fetch "$src" "$id" "$nr"
     ungpg "$src" "$id" "$nr"
     untar "$src" "$id" "$nr"
     echo "-- restore $src"
-    sync "$xdir" "$dst" -v | ts
+    sync "$xdir/" "$dst" -v | ts
     rm -r "$xdir"
 }
 
@@ -371,24 +380,24 @@ backup() {
     test -n "$1" || usage
     test -e "$1" || exits "source $1 missing"
 
-    src="$(realpath "$1")"
+    src=$(realpath "$1")
     tag=${2:-}
     date=$(daytime)
     latest=$(latest "$src")
 
     if test "$isfull" -eq 1 || test ! -e "$latest"; then
         isfull=1
-        id="$(genid)"
+        id=$(genid)
         nr="0"
     else
         parse "$latest"
         id="$pid"
-        nr="$((pnr+1))"
+        nr=$((pnr+1))
     fi
 
     mkdir -p "$fetchdir"
     bname="$(backname)"
-    xdir="$(mergedir "$src" "$id")" # target for sync and the tar source
+    xdir=$(mergedir "$src" "$id") # target for sync and the tar source
 
     test "$isfull" -eq 0 && thereis "$src" "$id"
     info # debug info
@@ -402,14 +411,14 @@ backup() {
     sync "$src/" "$xdir" -v | ts
     targ "$src" "$id"
     echo "-- gpg"
-    encrypt "$fetchdir/$bname".tar
     encrypt "$fetchdir/$bname".snr
+    encrypt "$fetchdir/$bname".tar
     echo "-- rsync repo"
-    for i in "$bname.tar.gpg" "$bname.snr.gpg"; do
+    for i in "$bname.snr.gpg" "$bname.tar.gpg"; do
         list "$fetchdir/$i"
         rsync -z "$fetchdir/$i" "$repo/"
     done
-    sum "$bname".tar.gpg "$bname".snr.gpg
+    sum "$bname".snr.gpg "$bname".tar.gpg
     touch "$repo/.repo"
 }
 
@@ -419,6 +428,13 @@ delete() {
 
     src="$(realpath "$1")"
     id="$2"
+
+    if test "$2" = "latest"; then
+        latest="$(latest "$src")"
+        parse "$latest"
+        id="$pid"
+        nr="$pnr"
+    fi
 
     thereis "$src" "$id"
     info # debug info
@@ -480,6 +496,7 @@ keep() {
         lastm="$pmonth"
         lastw="$pweek"
     done
+    test -s "$tokeep" || exits "operation would remove all backups"
     # find the backup groups to delete (this needs testing)
     torem=$(grep -vxFf "$tokeep" "$idall" | sort | uniq)
     while IFS= read -r id; do
