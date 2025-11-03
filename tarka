@@ -48,7 +48,7 @@ dayfmt() {
 }
 
 timefmt() {
-    printf %s "%H:%M"
+    printf %s "%H-%M"
 }
 
 daytime() {
@@ -92,8 +92,8 @@ passprompt() {
 cleanup() {
     echo "-- cleaning up"
     rm -f "$repo/.lock"
-    rm -f "$repo"/*.snr
-    rm -f "$repo"/*.tar
+    # rm -f "$repo"/*.snr
+    # rm -f "$repo"/*.tar
 }
 
 # shellcheck disable=SC2317
@@ -102,7 +102,7 @@ disconn() {
     cleanup
     fusermount -u "$repo"
     rmdir "$repo"
-    rm -r "$fetchdir"
+    rm -rf "$fetchdir"
     exit "$arg"
 }
 
@@ -193,6 +193,7 @@ ungpg() {
         parse "$i"
         test "$pnr" -gt "$3" && break
         list "$i"
+	rm -f "${i%.gpg}"
         gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" ||\
             exits "gpg decrypt error"
     done
@@ -205,8 +206,8 @@ untar() {
         parse "$i"
         test "$pnr" -gt "$3" && break
         list "$i"
-        tar -xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive $i"
-        rm "$i"
+        tar xpf "$i" -C "$fetchdir/" -G || exits "error untaring archive $i"
+        # rm "$i"
     done
     test -e "$(mergedir "$1" "$2")" || exits "assertion failed; merge directory is absent"
 }
@@ -297,7 +298,7 @@ list0() { list "$1" 0; }
 lists() {
     # shellcheck disable=SC2059
     test -z "$3" && printf "$(listfmt)\n" "src" "day" "time" "size" "id" "nr" "tag"
-    for i in "$repo/${1+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
+    for i in "$repo/${1:+$(realmangle "$1")}"*"${2:+=$2+}"*.gpg; do
         test -e "$i" || break
         list "$i" -1
     done
@@ -321,10 +322,14 @@ targ() { # tar with -g
     fi
     list "$bname.tar"
     echo "$bname.tar"
-    tar -C "$fetchdir" -cpvf "$fetchdir/$bname.tar" "${xdir#"$fetchdir/"}" \
-        -g "$fetchdir/$bname.snr" -P --lzma | ts || exits "archiving $fetchdir/$bname.tar failed"
+    savepwd="$pwd"
+    cd "$fetchdir"
+    tar cpvf "$bname.tar" "${xdir#"$fetchdir/"}" \
+        -g "$bname.snr" | ts || exits "archiving $fetchdir/$bname.tar failed"
+    # exit
+    cd "$savepwd"
     test -e "$fetchdir/$bname.tar" || exits "error archiving $fetchdir/$bname.tar"
-    rm -r "$xdir"
+    # rm -rf "$xdir"
 }
 
 isrepo() {
@@ -373,7 +378,7 @@ restore() { # src id
     untar "$src" "$id" "$nr"
     echo "-- restore $src"
     sync "$xdir/" "$dst" -v | ts
-    rm -r "$xdir"
+    rm -rf "$xdir"
 }
 
 backup() {
@@ -527,7 +532,7 @@ main() {
     isfull=0
     case "$1" in
         *:*)
-            fetchdir=$(mktemp -d)
+            fetchdir=/tmp/fetch
             repo=$(mktemp -d)
             printf %s "-- connecting... "
             (sshfs "$1" "$repo" && printf "ok\n") || exits "error; check auth"
@@ -538,9 +543,9 @@ main() {
             trap disconn EXIT
             ;;
         *)
-            test -e "$repo/.lock" && exits "repository locked"
-            repo="$(realpath "${2%/}")"
+            repo="$(realpath "${1%/}")"
             fetchdir="${repo}"
+	    test -e "$repo/.lock" && exits "repository locked"
             trap cleanup EXIT
             ;;
     esac
