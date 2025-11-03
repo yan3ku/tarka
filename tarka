@@ -92,8 +92,8 @@ passprompt() {
 cleanup() {
     echo "-- cleaning up"
     rm -f "$repo/.lock"
-    # rm -f "$repo"/*.snr
-    # rm -f "$repo"/*.tar
+    rm -f "$repo"/*.snr
+    rm -f "$repo"/*.tar
 }
 
 # shellcheck disable=SC2317
@@ -176,22 +176,22 @@ thereis() {
 fetch() { # fetches from sshfs
     [ "$repo" = "$fetchdir" ] && return
     echo "-- fetch"
-    for i in "$repo"/"$(realmangle "$1")"*"=$2+"*.gpg; do
+    for i in "$repo"/"$(realmangle "$1")"*"=$2"*"$3".gpg; do
         test -e "$i" || exits "backup for $1 $2 missing"
         parse "$i"
-        test "$ptag" = "#SNAR#" -a "$pnr" -ne "$(($3-1))" && continue
-        test "$pnr" -gt "$3" && break
+        test "$pnr" -gt "${4:-2137}" && break
         list "$i"
         sync "$i" "$fetchdir/${i#"$repo"}" || exits "failed fetching $i"
     done
+    set +x
 }
 
 ungpg() {
     echo "-- ungpg"
-    for i in "$fetchdir"/"$(realmangle "$1")"*"=$2+"*.gpg; do
+    for i in "$fetchdir"/"$(realmangle "$1")"*"=$2"*"$3".gpg; do
         test -e "$i" || exits "archive for $1 $2 missing"
         parse "$i"
-        test "$pnr" -gt "$3" && break
+        test "$pnr" -gt "${4:-2137}" && break
         list "$i"
 	rm -f "${i%.gpg}"
         gpg -q --batch --passphrase "$TARKA_PASSWORD" --output "${i%.gpg}" --decrypt "$i" ||\
@@ -311,7 +311,7 @@ sync() {
 targ() { # tar with -g
     echo "-- tar"
     bname="$(backname)"
-    xdir="$(mergedir "$1" "$2")"
+    xdir="$(mergedir "$1" "$2")"    
     if test "$isfull" -eq 0; then
         snar="$fetchdir/$(snarof "$latest")"
         list "$snar"
@@ -321,13 +321,8 @@ targ() { # tar with -g
         list "$bname.snr"
     fi
     list "$bname.tar"
-    echo "$bname.tar"
-    savepwd="$pwd"
-    cd "$fetchdir"
-    tar cpvf "$bname.tar" "${xdir#"$fetchdir/"}" \
-        -g "$bname.snr" | ts || exits "archiving $fetchdir/$bname.tar failed"
-    # exit
-    cd "$savepwd"
+    tar -cpv -P -C "$fetchdir" -f "$fetchdir/$bname.tar" "$src" --xform "s|$src|${xdir#"$fetchdir/"}|" \
+        -g "$fetchdir/$bname.snr" | ts || exits "archiving $fetchdir/$bname.tar failed"
     test -e "$fetchdir/$bname.tar" || exits "error archiving $fetchdir/$bname.tar"
     # rm -rf "$xdir"
 }
@@ -373,8 +368,8 @@ restore() { # src id
     thereis "$src" "$id"
     yesnp "$dst CONTENT WILL BE DELETED" || exits
     passprompt
-    fetch "$src" "$id" "$nr"
-    ungpg "$src" "$id" "$nr"
+    fetch "$src" "$id" "tar" "$nr"
+    ungpg "$src" "$id" "tar" "$nr"
     untar "$src" "$id" "$nr"
     echo "-- restore $src"
     sync "$xdir/" "$dst" -v | ts
@@ -408,12 +403,12 @@ backup() {
     info # debug info
     passprompt
     if test "$isfull" -eq 0; then
-        fetch "$src" "$id" "$nr"
-        ungpg "$src" "$id" "$nr"
-        untar "$src" "$id" "$nr"
+        fetch "$src" "$id+$((nr-1))" "snr"
+        ungpg "$src" "$id+$((nr-1))" "snr"
+        # untar "$src" "$id" "$nr"
     fi
-    echo "-- rsync source"
-    sync "$src/" "$xdir" -v | ts
+    # echo "-- rsync source"
+    # sync "$src/" "$xdir" -v | ts
     targ "$src" "$id"
     echo "-- gpg"
     encrypt "$fetchdir/$bname".snr
@@ -532,7 +527,7 @@ main() {
     isfull=0
     case "$1" in
         *:*)
-            fetchdir=/tmp/fetch
+            fetchdir=$(mktemp -d)
             repo=$(mktemp -d)
             printf %s "-- connecting... "
             (sshfs "$1" "$repo" && printf "ok\n") || exits "error; check auth"
